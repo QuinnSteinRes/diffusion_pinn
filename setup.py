@@ -14,8 +14,8 @@ setup(
     description="Physics-Informed Neural Network for Diffusion Problems",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Quinn Stein",
+    author_email="qs8@hw.ac.uk",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     python_requires=">=3.8",
@@ -33,6 +33,6 @@ setup(
     ],
     keywords="physics-informed neural networks, diffusion, machine learning",
     project_urls={
-        "Source": "https://github.com/yourusername/diffusion_pinn",
+        "Source": "https://github.com/QuinnSteinRes/diffusion_pinn",
     }
 )
