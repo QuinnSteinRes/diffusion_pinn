@@ -4,6 +4,11 @@ from pyDOE import lhs
 import tensorflow as tf
 from typing import Dict, Tuple
 
+import numpy as np
+from pyDOE import lhs
+import tensorflow as tf
+from typing import Dict, Tuple
+
 class DiffusionDataProcessor:
     """Data processor for diffusion PINN model"""
     
@@ -15,13 +20,19 @@ class DiffusionDataProcessor:
             inputfile: Path to CSV file containing x, y, t, intensity data
             normalize_spatial: If True, normalize spatial coordinates to [0,1]
         """
-        # Read CSV file
-        df = pd.read_csv(inputfile)
+        # Read data using numpy
+        data = np.genfromtxt(inputfile, delimiter=',', skip_header=1, dtype=float)
+        
+        # Extract columns
+        x_data = data[:, 0]
+        y_data = data[:, 1]
+        t_data = data[:, 2]
+        intensity_data = data[:, 3]
         
         # Extract unique coordinates
-        self.x_raw = np.sort(df['x'].unique())
-        self.y_raw = np.sort(df['y'].unique())
-        self.t = np.sort(df['t'].unique())
+        self.x_raw = np.sort(np.unique(x_data))
+        self.y_raw = np.sort(np.unique(y_data))
+        self.t = np.sort(np.unique(t_data))
         
         # Normalize spatial coordinates if requested
         if normalize_spatial:
@@ -29,32 +40,33 @@ class DiffusionDataProcessor:
             self.y = (self.y_raw - self.y_raw.min()) / (self.y_raw.max() - self.y_raw.min())
             
             # Transform the data points
-            df['x_norm'] = (df['x'] - self.x_raw.min()) / (self.x_raw.max() - self.x_raw.min())
-            df['y_norm'] = (df['y'] - self.y_raw.min()) / (self.y_raw.max() - self.y_raw.min())
-            
-            # Use normalized coordinates
-            x_coords = df['x_norm']
-            y_coords = df['y_norm']
+            x_norm = (x_data - self.x_raw.min()) / (self.x_raw.max() - self.x_raw.min())
+            y_norm = (y_data - self.y_raw.min()) / (self.y_raw.max() - self.y_raw.min())
         else:
             self.x = self.x_raw
             self.y = self.y_raw
-            x_coords = df['x']
-            y_coords = df['y']
+            x_norm = x_data
+            y_norm = y_data
         
         # Reshape intensity data into 3D array
         nx, ny, nt = len(self.x), len(self.y), len(self.t)
         self.usol = np.zeros((nx, ny, nt))
         
+        # Create mapping dictionaries for faster lookup
+        x_indices = {val: idx for idx, val in enumerate(self.x)}
+        y_indices = {val: idx for idx, val in enumerate(self.y)}
+        t_indices = {val: idx for idx, val in enumerate(self.t)}
+        
         # Fill the 3D array with intensity values
-        for idx, row in df.iterrows():
+        for idx in range(len(x_data)):
             if normalize_spatial:
-                i = np.where(self.x == row['x_norm'])[0][0]
-                j = np.where(self.y == row['y_norm'])[0][0]
+                i = x_indices[x_norm[idx]]
+                j = y_indices[y_norm[idx]]
             else:
-                i = np.where(self.x == row['x'])[0][0]
-                j = np.where(self.y == row['y'])[0][0]
-            k = np.where(self.t == row['t'])[0][0]
-            self.usol[i, j, k] = row['intensity']
+                i = x_indices[x_data[idx]]
+                j = y_indices[y_data[idx]]
+            k = t_indices[t_data[idx]]
+            self.usol[i, j, k] = intensity_data[idx]
         
         # Create meshgrid
         self.X, self.Y, self.T = np.meshgrid(self.x, self.y, self.t, indexing='ij')
@@ -70,7 +82,6 @@ class DiffusionDataProcessor:
         
         # Flatten solution
         self.u = self.usol.flatten('F')[:,None]
-
     def get_boundary_and_interior_points(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Extract boundary, initial, and interior points with their values

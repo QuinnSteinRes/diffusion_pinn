@@ -1,0 +1,28 @@
+{
+    "hidden_layers": [
+        40,
+        40,
+        40,
+        40,
+        40
+    ],
+    "activation": "tanh",
+    "initialization": "glorot",
+    "diffusion_trainable": true,
+    "use_physics_loss": true,
+    "spatial_bounds": {
+        "x": [
+            0.0,
+            1.0
+        ],
+        "y": [
+            0.0,
+            1.0
+        ]
+    },
+    "time_bounds": [
+        0.0,
+        7.0
+    ],
+    "D_value": 0.9472386837005615
+}

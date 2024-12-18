@@ -13,7 +13,7 @@ from diffusion_pinn.utils.visualization import (
 
 def main():
     # File paths
-    input_file = "path/to/your/data.csv"  # Update with your data path
+    input_file = "/home/qpy/miniconda3/envs/nnmodelling/diffusion_pinn/src/diffusion_pinn/data/intensity_time_series_spatial_temporal.csv"  # Update with your data path
     save_dir = "saved_models"  # Directory to save model checkpoints
     
     # Create and initialize PINN
