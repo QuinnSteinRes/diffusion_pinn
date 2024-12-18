@@ -1,6 +1,6 @@
-import numpy as np
+import matplotlib
+matplotlib.use('TkAgg')  # Do this before importing plt
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 from typing import List, Dict
 
 def plot_solutions_and_error(pinn: 'DiffusionPINN', 
