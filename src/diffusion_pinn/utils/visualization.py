@@ -1,5 +1,5 @@
 import matplotlib
-matplotlib.use('TkAgg')  # Do this before importing plt
+matplotlib.use('TkAgg')  
 import matplotlib.pyplot as plt
 from typing import List, Dict
 
