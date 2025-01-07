@@ -1,6 +1,6 @@
 import tensorflow as tf
+from diffusion_pinn import DiffusionConfig
 from diffusion_pinn import (
-    DiffusionConfig,
     DiffusionPINN,
     DiffusionDataProcessor
 )
@@ -12,16 +12,19 @@ from diffusion_pinn.utils.visualization import (
 )
 
 def main():
-    # File paths
-    input_file = "/home/qpy/miniconda3/envs/nnmodelling/diffusion_pinn/src/diffusion_pinn/data/intensity_time_series_spatial_temporal.csv"  # Update with your data path
-    save_dir = "saved_models"  # Directory to save model checkpoints
-    
+    # Create configuration
+    config = DiffusionConfig()
+
+    # File paths using the configuration
+    input_file = config.get_data_file("intensity_time_series_spatial_temporal.csv")
+    save_dir = config.get_saved_models_dir()
+
     # Create and initialize PINN
     pinn, data = create_and_initialize_pinn(
-        inputfile=input_file,
-        N_u=1000,      # boundary points
-        N_f=20000,     # collocation points
-        N_i=10000,     # interior supervision points
+        inputfile=str(input_file),  # Convert Path to string
+        N_u=1000,  # boundary points
+        N_f=20000,  # collocation points
+        N_i=10000,  # interior supervision points
         initial_D=1.0  # initial guess for diffusion coefficient
     )
 
@@ -41,29 +44,34 @@ def main():
         data=data,
         optimizer=optimizer,
         epochs=20000,
-        save_dir=save_dir
+        save_dir=str(save_dir)  # Convert Path to string
     )
 
     # Plot results
     print("\nTraining completed. Plotting results...")
-    
+
     # Plot loss history
     plot_loss_history(loss_history)
 
     # Plot solutions at different time points
-    data_processor = DiffusionDataProcessor(input_file)
+    data_processor = DiffusionDataProcessor(str(input_file))  # Convert Path to string
     t_indices = [0, len(data_processor.t)//3, 2*len(data_processor.t)//3, -1]
+
+    # Create results directory if it doesn't exist
+    results_dir = config.get_project_root() / "results"
+    results_dir.mkdir(exist_ok=True)
+
     plot_solutions_and_error(
         pinn=pinn,
         data_processor=data_processor,
         t_indices=t_indices,
-        save_path='final_solutions.png'
+        save_path=str(results_dir / 'final_solutions.png')
     )
 
     # Plot diffusion coefficient convergence
     plot_diffusion_convergence(
         D_history=D_history,
-        save_path='D_convergence.png'
+        save_path=str(results_dir / 'D_convergence.png')
     )
 
     print("\nFinal diffusion coefficient:", pinn.get_diffusion_coefficient())
