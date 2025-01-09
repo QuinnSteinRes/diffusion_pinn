@@ -41,12 +41,15 @@ class DiffusionConfig:
 
     def get_data_file(self, filename: str) -> Path:
         """Get the full path to a data file"""
-        return self.get_data_dir() / filename
+        #return self.get_data_dir() / filename
+        return filename
 
     def get_ground_truth_file(self, filename: str) -> Path:
         """Get the full path to a ground truth file"""
-        return self.get_ground_truth_dir() / filename
+        #return self.get_ground_truth_dir() / filename
+        return filename
 
     def get_saved_model_file(self, filename: str) -> Path:
         """Get the full path to a saved model file"""
-        return self.get_saved_models_dir() / filename
+        #return self.get_saved_models_dir() / filename
+        return filename

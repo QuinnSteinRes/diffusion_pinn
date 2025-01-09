@@ -1,0 +1,400 @@
+running install
+running bdist_egg
+running egg_info
+writing src/diffusion_pinn.egg-info/PKG-INFO
+writing dependency_links to src/diffusion_pinn.egg-info/dependency_links.txt
+writing requirements to src/diffusion_pinn.egg-info/requires.txt
+writing top-level names to src/diffusion_pinn.egg-info/top_level.txt
+reading manifest file 'src/diffusion_pinn.egg-info/SOURCES.txt'
+writing manifest file 'src/diffusion_pinn.egg-info/SOURCES.txt'
+installing library code to build/bdist.linux-x86_64/egg
+running install_lib
+running build_py
+creating build/lib/image_processing
+copying src/image_processing/batch_processor.py -> build/lib/image_processing
+copying src/image_processing/__init__.py -> build/lib/image_processing
+creating build/lib/training
+copying src/training/__init__.py -> build/lib/training
+copying src/training/trainer.py -> build/lib/training
+creating build/lib/models
+copying src/models/__init__.py -> build/lib/models
+copying src/models/pinn.py -> build/lib/models
+creating build/lib/data
+copying src/data/__init__.py -> build/lib/data
+copying src/data/testing.py -> build/lib/data
+copying src/data/processor.py -> build/lib/data
+copying src/data/data_info.py -> build/lib/data
+creating build/lib/utils
+copying src/utils/visualization.py -> build/lib/utils
+copying src/utils/__init__.py -> build/lib/utils
+creating build/lib/ground_truth
+copying src/ground_truth/plt_test.py -> build/lib/ground_truth
+copying src/ground_truth/__init__.py -> build/lib/ground_truth
+copying src/ground_truth/2D_u_curveGhostCell.py -> build/lib/ground_truth
+creating build/bdist.linux-x86_64/egg
+creating build/bdist.linux-x86_64/egg/image_processing
+copying build/lib/image_processing/batch_processor.py -> build/bdist.linux-x86_64/egg/image_processing
+copying build/lib/image_processing/__init__.py -> build/bdist.linux-x86_64/egg/image_processing
+creating build/bdist.linux-x86_64/egg/training
+copying build/lib/training/__init__.py -> build/bdist.linux-x86_64/egg/training
+copying build/lib/training/trainer.py -> build/bdist.linux-x86_64/egg/training
+creating build/bdist.linux-x86_64/egg/diffusion_pinn
+creating build/bdist.linux-x86_64/egg/diffusion_pinn/image_processing
+copying build/lib/diffusion_pinn/image_processing/batch_processor.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/image_processing
+copying build/lib/diffusion_pinn/image_processing/__init__.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/image_processing
+creating build/bdist.linux-x86_64/egg/diffusion_pinn/training
+copying build/lib/diffusion_pinn/training/__init__.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/training
+copying build/lib/diffusion_pinn/training/trainer.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/training
+creating build/bdist.linux-x86_64/egg/diffusion_pinn/models
+copying build/lib/diffusion_pinn/models/__init__.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/models
+copying build/lib/diffusion_pinn/models/pinn.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/models
+copying build/lib/diffusion_pinn/__init__.py -> build/bdist.linux-x86_64/egg/diffusion_pinn
+creating build/bdist.linux-x86_64/egg/diffusion_pinn/data
+copying build/lib/diffusion_pinn/data/__init__.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/data
+copying build/lib/diffusion_pinn/data/testing.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/data
+copying build/lib/diffusion_pinn/data/processor.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/data
+copying build/lib/diffusion_pinn/data/data_info.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/data
+copying build/lib/diffusion_pinn/config.py -> build/bdist.linux-x86_64/egg/diffusion_pinn
+creating build/bdist.linux-x86_64/egg/diffusion_pinn/utils
+copying build/lib/diffusion_pinn/utils/visualization.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/utils
+copying build/lib/diffusion_pinn/utils/__init__.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/utils
+creating build/bdist.linux-x86_64/egg/diffusion_pinn/ground_truth
+copying build/lib/diffusion_pinn/ground_truth/plt_test.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/ground_truth
+copying build/lib/diffusion_pinn/ground_truth/__init__.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/ground_truth
+copying build/lib/diffusion_pinn/ground_truth/2D_u_curveGhostCell.py -> build/bdist.linux-x86_64/egg/diffusion_pinn/ground_truth
+creating build/bdist.linux-x86_64/egg/models
+copying build/lib/models/__init__.py -> build/bdist.linux-x86_64/egg/models
+copying build/lib/models/pinn.py -> build/bdist.linux-x86_64/egg/models
+creating build/bdist.linux-x86_64/egg/data
+copying build/lib/data/__init__.py -> build/bdist.linux-x86_64/egg/data
+copying build/lib/data/testing.py -> build/bdist.linux-x86_64/egg/data
+copying build/lib/data/processor.py -> build/bdist.linux-x86_64/egg/data
+copying build/lib/data/data_info.py -> build/bdist.linux-x86_64/egg/data
+creating build/bdist.linux-x86_64/egg/utils
+copying build/lib/utils/visualization.py -> build/bdist.linux-x86_64/egg/utils
+copying build/lib/utils/__init__.py -> build/bdist.linux-x86_64/egg/utils
+creating build/bdist.linux-x86_64/egg/ground_truth
+copying build/lib/ground_truth/plt_test.py -> build/bdist.linux-x86_64/egg/ground_truth
+copying build/lib/ground_truth/__init__.py -> build/bdist.linux-x86_64/egg/ground_truth
+copying build/lib/ground_truth/2D_u_curveGhostCell.py -> build/bdist.linux-x86_64/egg/ground_truth
+byte-compiling build/bdist.linux-x86_64/egg/image_processing/batch_processor.py to batch_processor.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/image_processing/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/training/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/training/trainer.py to trainer.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/image_processing/batch_processor.py to batch_processor.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/image_processing/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/training/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/training/trainer.py to trainer.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/models/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/models/pinn.py to pinn.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/data/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/data/testing.py to testing.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/data/processor.py to processor.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/data/data_info.py to data_info.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/config.py to config.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/utils/visualization.py to visualization.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/utils/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/ground_truth/plt_test.py to plt_test.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/ground_truth/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/diffusion_pinn/ground_truth/2D_u_curveGhostCell.py to 2D_u_curveGhostCell.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/models/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/models/pinn.py to pinn.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/data/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/data/testing.py to testing.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/data/processor.py to processor.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/data/data_info.py to data_info.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/utils/visualization.py to visualization.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/utils/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/ground_truth/plt_test.py to plt_test.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/ground_truth/__init__.py to __init__.cpython-312.pyc
+byte-compiling build/bdist.linux-x86_64/egg/ground_truth/2D_u_curveGhostCell.py to 2D_u_curveGhostCell.cpython-312.pyc
+creating build/bdist.linux-x86_64/egg/EGG-INFO
+copying src/diffusion_pinn.egg-info/PKG-INFO -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying src/diffusion_pinn.egg-info/SOURCES.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying src/diffusion_pinn.egg-info/dependency_links.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying src/diffusion_pinn.egg-info/requires.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying src/diffusion_pinn.egg-info/top_level.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+creating 'dist/diffusion_pinn-0.1.0-py3.12.egg' and adding 'build/bdist.linux-x86_64/egg' to it
+removing 'build/bdist.linux-x86_64/egg' (and everything under it)
+Processing diffusion_pinn-0.1.0-py3.12.egg
+removing '/home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages/diffusion_pinn-0.1.0-py3.12.egg' (and everything under it)
+creating /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages/diffusion_pinn-0.1.0-py3.12.egg
+Extracting diffusion_pinn-0.1.0-py3.12.egg to /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Removing diffusion-pinn 0.1.0 from easy-install.pth file
+Adding diffusion-pinn 0.1.0 to easy-install.pth file
+detected new path '/home/quinn/miniconda3/envs/pinn/gitrep/diffusion_pinn/src'
+
+Installed /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages/diffusion_pinn-0.1.0-py3.12.egg
+Processing dependencies for diffusion-pinn==0.1.0
+Searching for pytest==7.4.4
+Best match: pytest 7.4.4
+Adding pytest 7.4.4 to easy-install.pth file
+Installing py.test script to /home/quinn/miniconda3/envs/pinn/bin
+Installing pytest script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for typing==3.7.4.3
+Best match: typing 3.7.4.3
+Adding typing 3.7.4.3 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for pyDOE==0.3.8
+Best match: pyDOE 0.3.8
+Adding pyDOE 0.3.8 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for matplotlib==3.9.2
+Best match: matplotlib 3.9.2
+Adding matplotlib 3.9.2 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for scipy==1.14.1
+Best match: scipy 1.14.1
+Adding scipy 1.14.1 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for numpy==1.26.4
+Best match: numpy 1.26.4
+Adding numpy 1.26.4 to easy-install.pth file
+Installing f2py script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for tensorflow==2.17.0
+Best match: tensorflow 2.17.0
+Adding tensorflow 2.17.0 to easy-install.pth file
+Installing import_pb_to_tensorboard script to /home/quinn/miniconda3/envs/pinn/bin
+Installing saved_model_cli script to /home/quinn/miniconda3/envs/pinn/bin
+Installing tensorboard script to /home/quinn/miniconda3/envs/pinn/bin
+Installing tf_upgrade_v2 script to /home/quinn/miniconda3/envs/pinn/bin
+Installing tflite_convert script to /home/quinn/miniconda3/envs/pinn/bin
+Installing toco script to /home/quinn/miniconda3/envs/pinn/bin
+Installing toco_from_protos script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for pluggy==1.5.0
+Best match: pluggy 1.5.0
+Adding pluggy 1.5.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for packaging==24.2
+Best match: packaging 24.2
+Adding packaging 24.2 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for iniconfig==1.1.1
+Best match: iniconfig 1.1.1
+Adding iniconfig 1.1.1 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for python-dateutil==2.9.0.post0
+Best match: python-dateutil 2.9.0.post0
+Adding python-dateutil 2.9.0.post0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for pyparsing==3.2.0
+Best match: pyparsing 3.2.0
+Adding pyparsing 3.2.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for pillow==11.0.0
+Best match: pillow 11.0.0
+Adding pillow 11.0.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for kiwisolver==1.4.4
+Best match: kiwisolver 1.4.4
+Adding kiwisolver 1.4.4 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for fonttools==4.51.0
+Best match: fonttools 4.51.0
+Adding fonttools 4.51.0 to easy-install.pth file
+Installing fonttools script to /home/quinn/miniconda3/envs/pinn/bin
+Installing pyftmerge script to /home/quinn/miniconda3/envs/pinn/bin
+Installing pyftsubset script to /home/quinn/miniconda3/envs/pinn/bin
+Installing ttx script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for cycler==0.11.0
+Best match: cycler 0.11.0
+Adding cycler 0.11.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for contourpy==1.3.1
+Best match: contourpy 1.3.1
+Adding contourpy 1.3.1 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for keras==3.6.0
+Best match: keras 3.6.0
+Adding keras 3.6.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for tensorboard==2.17.0
+Best match: tensorboard 2.17.0
+Adding tensorboard 2.17.0 to easy-install.pth file
+Installing tensorboard script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for grpcio==1.62.2
+Best match: grpcio 1.62.2
+Adding grpcio 1.62.2 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for wrapt==1.14.1
+Best match: wrapt 1.14.1
+Adding wrapt 1.14.1 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for typing-extensions==4.12.2
+Best match: typing-extensions 4.12.2
+Adding typing-extensions 4.12.2 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages/setuptools/_vendor
+Searching for termcolor==2.1.0
+Best match: termcolor 2.1.0
+Adding termcolor 2.1.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for six==1.16.0
+Best match: six 1.16.0
+Adding six 1.16.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for setuptools==75.1.0
+Best match: setuptools 75.1.0
+Adding setuptools 75.1.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for requests==2.32.3
+Best match: requests 2.32.3
+Adding requests 2.32.3 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for protobuf==4.25.3
+Best match: protobuf 4.25.3
+Adding protobuf 4.25.3 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for opt-einsum==3.3.0
+Best match: opt-einsum 3.3.0
+Adding opt-einsum 3.3.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for ml-dtypes==0.4.0
+Best match: ml-dtypes 0.4.0
+Adding ml-dtypes 0.4.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for h5py==3.12.1
+Best match: h5py 3.12.1
+Adding h5py 3.12.1 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for google-pasta==0.2.0
+Best match: google-pasta 0.2.0
+Adding google-pasta 0.2.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for gast==0.5.3
+Best match: gast 0.5.3
+Adding gast 0.5.3 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for flatbuffers==24.3.25
+Best match: flatbuffers 24.3.25
+Adding flatbuffers 24.3.25 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for astunparse==1.6.3
+Best match: astunparse 1.6.3
+Adding astunparse 1.6.3 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for absl-py==2.1.0
+Best match: absl-py 2.1.0
+Adding absl-py 2.1.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for optree==0.12.1
+Best match: optree 0.12.1
+Adding optree 0.12.1 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for namex==0.0.7
+Best match: namex 0.0.7
+Adding namex 0.0.7 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for rich==13.9.4
+Best match: rich 13.9.4
+Adding rich 13.9.4 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for werkzeug==3.0.6
+Best match: werkzeug 3.0.6
+Adding werkzeug 3.0.6 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for tensorboard-data-server==0.7.0
+Best match: tensorboard-data-server 0.7.0
+Adding tensorboard-data-server 0.7.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for Markdown==3.4.1
+Best match: Markdown 3.4.1
+Adding Markdown 3.4.1 to easy-install.pth file
+Installing markdown_py script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for certifi==2024.12.14
+Best match: certifi 2024.12.14
+Adding certifi 2024.12.14 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for urllib3==2.2.3
+Best match: urllib3 2.2.3
+Adding urllib3 2.2.3 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for idna==3.7
+Best match: idna 3.7
+Adding idna 3.7 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for charset-normalizer==3.3.2
+Best match: charset-normalizer 3.3.2
+Adding charset-normalizer 3.3.2 to easy-install.pth file
+Installing normalizer script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for wheel==0.44.0
+Best match: wheel 0.44.0
+Adding wheel 0.44.0 to easy-install.pth file
+Installing wheel script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for Pygments==2.15.1
+Best match: Pygments 2.15.1
+Adding Pygments 2.15.1 to easy-install.pth file
+Installing pygmentize script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for markdown-it-py==2.2.0
+Best match: markdown-it-py 2.2.0
+Adding markdown-it-py 2.2.0 to easy-install.pth file
+Installing markdown-it script to /home/quinn/miniconda3/envs/pinn/bin
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for MarkupSafe==2.1.3
+Best match: MarkupSafe 2.1.3
+Adding MarkupSafe 2.1.3 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Searching for mdurl==0.1.0
+Best match: mdurl 0.1.0
+Adding mdurl 0.1.0 to easy-install.pth file
+
+Using /home/quinn/miniconda3/envs/pinn/lib/python3.12/site-packages
+Finished processing dependencies for diffusion-pinn==0.1.0

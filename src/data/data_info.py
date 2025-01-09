@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Read your CSV file
-df = pd.read_csv("/home/qpy/miniconda3/envs/nnmodelling/diffusion_pinn/src/diffusion_pinn/data/intensity_time_series_spatial_temporal.csv")
+df = pd.read_csv("intensity_time_series_spatial_temporal.csv")
 
 # Print basic information
 print("DataFrame Info:")

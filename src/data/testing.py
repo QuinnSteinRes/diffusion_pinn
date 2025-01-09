@@ -1,7 +1,7 @@
 import numpy as np
 
 def read_csv_numpy():
-    filename = "/home/qpy/miniconda3/envs/nnmodelling/diffusion_pinn/src/diffusion_pinn/data/intensity_time_series_spatial_temporal.csv"
+    filename = "intensity_time_series_spatial_temporal.csv"
     try:
         # Load data using numpy directly
         data = np.genfromtxt(filename, delimiter=',', skip_header=1,
