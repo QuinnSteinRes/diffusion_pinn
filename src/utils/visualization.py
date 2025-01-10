@@ -1,4 +1,3 @@
-# visualization.py
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for cluster
 import matplotlib.pyplot as plt
@@ -8,17 +7,110 @@ import os
 from typing import List, Dict
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-# Core plotting functions
-def plot_solutions_and_error(pinn, data_processor, t_indices, save_path=None):
-    """Original detailed solution plotting function"""
-    [Your existing implementation]
+def plot_solutions_and_error(pinn: 'DiffusionPINN',
+                           data_processor: 'DiffusionDataProcessor',
+                           t_indices: List[int],
+                           save_path: str = None) -> None:
+    """
+    Plot true vs predicted solutions and error at specified time points
+
+    Args:
+        pinn: Trained PINN model
+        data_processor: Data processor containing the true solution
+        t_indices: List of time indices to plot
+        save_path: Optional path to save the figure
+    """
+    fig, axes = plt.subplots(3, len(t_indices), figsize=(5*len(t_indices), 12))
+
+    # Get meshgrid for plotting
+    Y, X = np.meshgrid(data_processor.y, data_processor.x)
+    t_vals = data_processor.t.flatten()
+
+    # Pre-calculate all solutions and errors for global min/max
+    solutions_true = []
+    solutions_pred = []
+    errors = []
+
+    for t_idx in t_indices:
+        t_val = t_vals[t_idx]
+
+        # Create input points grid
+        input_points = np.hstack([
+            X.flatten()[:,None],
+            Y.flatten()[:,None],
+            np.ones_like(X.flatten()[:,None]) * t_val
+        ])
+
+        # Get predictions and reshape to match grid
+        pred = pinn.predict(input_points)
+        pred_reshaped = pred.numpy().reshape(X.shape)
+
+        # Get true solution for this time step
+        true = data_processor.usol[:,:,t_idx]
+
+        # Calculate error
+        error = np.abs(pred_reshaped - true)
+
+        solutions_true.append(true)
+        solutions_pred.append(pred_reshaped)
+        errors.append(error)
+
+    # Get global min/max values
+    vmin_solution = min(np.min(solutions_true), np.min(solutions_pred))
+    vmax_solution = max(np.max(solutions_true), np.max(solutions_pred))
+    vmax_error = np.max(errors)
+
+    for idx, t_idx in enumerate(t_indices):
+        t_val = t_vals[t_idx]
+
+        # Plot true solution
+        im1 = axes[0,idx].pcolormesh(X, Y, solutions_true[idx],
+                                    vmin=vmin_solution, vmax=vmax_solution,
+                                    shading='auto')
+        axes[0,idx].set_title(f't = {t_val:.3f} (True)')
+        if idx == len(t_indices)-1:
+            divider = make_axes_locatable(axes[0,idx])
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            plt.colorbar(im1, cax=cax)
+
+        # Plot predicted solution
+        im2 = axes[1,idx].pcolormesh(X, Y, solutions_pred[idx],
+                                    vmin=vmin_solution, vmax=vmax_solution,
+                                    shading='auto')
+        axes[1,idx].set_title(f't = {t_val:.3f} (Predicted)')
+        if idx == len(t_indices)-1:
+            divider = make_axes_locatable(axes[1,idx])
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            plt.colorbar(im2, cax=cax)
+
+        # Plot error
+        im3 = axes[2,idx].pcolormesh(X, Y, errors[idx],
+                                    vmin=0, vmax=vmax_error,
+                                    shading='auto')
+        axes[2,idx].set_title(f't = {t_val:.3f} (Error)')
+        if idx == len(t_indices)-1:
+            divider = make_axes_locatable(axes[2,idx])
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            plt.colorbar(im3, cax=cax)
+
+        # Set equal aspect ratio and add labels
+        for ax_row in axes:
+            ax_row[idx].set_aspect('equal')
+            ax_row[idx].set_xlabel('x')
+            ax_row[idx].set_ylabel('y')
+
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path)
+    plt.close()
 
 def plot_loss_history(losses, save_dir='results', save_data=True):
     """
     Enhanced loss history plotting that combines both implementations
 
     Args:
-        losses: Either List[Dict] (from original) or Dict (from plot_results)
+        losses: Either List[Dict] or Dict containing loss values
         save_dir: Directory to save plots and data
         save_data: Whether to also save CSV data
     """
@@ -65,7 +157,11 @@ def plot_loss_history(losses, save_dir='results', save_data=True):
 def plot_diffusion_convergence(d_history, save_dir='results', save_data=True):
     """
     Enhanced diffusion coefficient convergence plotting
-    Combines functionality from both implementations
+
+    Args:
+        d_history: List of diffusion coefficients during training
+        save_dir: Directory to save plots and data
+        save_data: Whether to also save CSV data
     """
     os.makedirs(save_dir, exist_ok=True)
 
