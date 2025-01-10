@@ -1,14 +1,10 @@
 import matplotlib
-import os
-# Remove or comment out the TkAgg line:
-# matplotlib.use('TkAgg')  
-# Instead, we'll add:
-matplotlib.use('Agg')  # This will work on both cluster and local
+matplotlib.use('Agg')  # Non-interactive backend for cluster
 import matplotlib.pyplot as plt
 from typing import List, Dict
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
+import os
 
 def plot_solutions_and_error(pinn: 'DiffusionPINN',
                            data_processor: 'DiffusionDataProcessor',
@@ -104,8 +100,10 @@ def plot_solutions_and_error(pinn: 'DiffusionPINN',
 
     plt.tight_layout()
     if save_path:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path)
-    plt.show()
+    plt.close()
 
 def plot_diffusion_convergence(D_history: List[float], save_path: str = None) -> None:
     """
@@ -124,15 +122,17 @@ def plot_diffusion_convergence(D_history: List[float], save_path: str = None) ->
     plt.legend()
     plt.grid(True)
     if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path)
-    plt.show()
+    plt.close()
 
-def plot_loss_history(loss_history: List[Dict[str, float]]) -> None:
+def plot_loss_history(loss_history: List[Dict[str, float]], save_path: str = None) -> None:
     """
     Plot training loss history
 
     Args:
         loss_history: List of dictionaries containing loss components
+        save_path: Optional path to save the figure
     """
     if not loss_history:
         print("Error: loss_history is empty")
@@ -161,4 +161,7 @@ def plot_loss_history(loss_history: List[Dict[str, float]]) -> None:
     plt.title('Training Loss History')
     plt.legend()
     plt.grid(True)
-    plt.show()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path)
+    plt.close()
