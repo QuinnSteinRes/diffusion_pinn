@@ -1,167 +1,92 @@
+# visualization.py
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for cluster
 import matplotlib.pyplot as plt
-from typing import List, Dict
 import numpy as np
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+import pandas as pd
 import os
+from typing import List, Dict
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-def plot_solutions_and_error(pinn: 'DiffusionPINN',
-                           data_processor: 'DiffusionDataProcessor',
-                           t_indices: List[int],
-                           save_path: str = None) -> None:
+# Core plotting functions
+def plot_solutions_and_error(pinn, data_processor, t_indices, save_path=None):
+    """Original detailed solution plotting function"""
+    [Your existing implementation]
+
+def plot_loss_history(losses, save_dir='results', save_data=True):
     """
-    Plot true vs predicted solutions and error at specified time points
+    Enhanced loss history plotting that combines both implementations
 
     Args:
-        pinn: Trained PINN model
-        data_processor: Data processor containing the true solution
-        t_indices: List of time indices to plot
-        save_path: Optional path to save the figure
+        losses: Either List[Dict] (from original) or Dict (from plot_results)
+        save_dir: Directory to save plots and data
+        save_data: Whether to also save CSV data
     """
-    fig, axes = plt.subplots(3, len(t_indices), figsize=(5*len(t_indices), 12))
+    os.makedirs(save_dir, exist_ok=True)
 
-    # Get meshgrid for plotting
-    Y, X = np.meshgrid(data_processor.y, data_processor.x)
-    t_vals = data_processor.t.flatten()
+    # Handle both input formats
+    if isinstance(losses, list):
+        # Convert list of dicts to dataframe format
+        epochs = range(len(losses))
+        df = pd.DataFrame({'epoch': epochs})
+        components = ['initial', 'boundary', 'interior', 'physics', 'total']
+        for component in components:
+            try:
+                df[component] = [loss.get(component, np.nan) for loss in losses]
+            except Exception as e:
+                print(f"Warning: Could not process {component} loss: {str(e)}")
+    else:
+        # Handle dict format from plot_results version
+        epochs = list(range(len(next(iter(losses.values())))))
+        df = pd.DataFrame({'epoch': epochs})
+        for loss_name, values in losses.items():
+            df[loss_name] = values
 
-    # Pre-calculate all solutions and errors for global min/max
-    solutions_true = []
-    solutions_pred = []
-    errors = []
+    # Save data if requested
+    if save_data:
+        df.to_csv(os.path.join(save_dir, 'loss_data.csv'), index=False)
 
-    for t_idx in t_indices:
-        t_val = t_vals[t_idx]
+    # Create plot
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for column in df.columns:
+        if column != 'epoch':
+            ax.semilogy(df['epoch'], df[column], label=column)
 
-        # Create input points grid
-        input_points = np.hstack([
-            X.flatten()[:,None],
-            Y.flatten()[:,None],
-            np.ones_like(X.flatten()[:,None]) * t_val
-        ])
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss (log scale)')
+    ax.set_title('Training Loss History')
+    ax.legend()
+    ax.grid(True)
 
-        # Get predictions and reshape to match grid
-        pred = pinn.predict(input_points)
-        pred_reshaped = pred.numpy().reshape(X.shape)
+    # Save plot
+    fig.savefig(os.path.join(save_dir, 'loss_history.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig)
 
-        # Get true solution for this time step
-        true = data_processor.usol[:,:,t_idx]
-
-        # Calculate error
-        error = np.abs(pred_reshaped - true)
-
-        solutions_true.append(true)
-        solutions_pred.append(pred_reshaped)
-        errors.append(error)
-
-    # Get global min/max values
-    vmin_solution = min(np.min(solutions_true), np.min(solutions_pred))
-    vmax_solution = max(np.max(solutions_true), np.max(solutions_pred))
-    vmax_error = np.max(errors)
-
-    for idx, t_idx in enumerate(t_indices):
-        t_val = t_vals[t_idx]
-
-        # Plot true solution
-        im1 = axes[0,idx].pcolormesh(X, Y, solutions_true[idx],
-                                    vmin=vmin_solution, vmax=vmax_solution,
-                                    shading='auto')
-        axes[0,idx].set_title(f't = {t_val:.3f} (True)')
-        if idx == len(t_indices)-1:
-            divider = make_axes_locatable(axes[0,idx])
-            cax = divider.append_axes("right", size="5%", pad=0.05)
-            plt.colorbar(im1, cax=cax)
-
-        # Plot predicted solution
-        im2 = axes[1,idx].pcolormesh(X, Y, solutions_pred[idx],
-                                    vmin=vmin_solution, vmax=vmax_solution,
-                                    shading='auto')
-        axes[1,idx].set_title(f't = {t_val:.3f} (Predicted)')
-        if idx == len(t_indices)-1:
-            divider = make_axes_locatable(axes[1,idx])
-            cax = divider.append_axes("right", size="5%", pad=0.05)
-            plt.colorbar(im2, cax=cax)
-
-        # Plot error
-        im3 = axes[2,idx].pcolormesh(X, Y, errors[idx],
-                                    vmin=0, vmax=vmax_error,
-                                    shading='auto')
-        axes[2,idx].set_title(f't = {t_val:.3f} (Error)')
-        if idx == len(t_indices)-1:
-            divider = make_axes_locatable(axes[2,idx])
-            cax = divider.append_axes("right", size="5%", pad=0.05)
-            plt.colorbar(im3, cax=cax)
-
-        # Set equal aspect ratio and add labels
-        for ax_row in axes:
-            ax_row[idx].set_aspect('equal')
-            ax_row[idx].set_xlabel('x')
-            ax_row[idx].set_ylabel('y')
-
-    plt.tight_layout()
-    if save_path:
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path)
-    plt.close()
-
-def plot_diffusion_convergence(D_history: List[float], save_path: str = None) -> None:
+def plot_diffusion_convergence(d_history, save_dir='results', save_data=True):
     """
-    Plot convergence of diffusion coefficient
-
-    Args:
-        D_history: List of diffusion coefficients during training
-        save_path: Optional path to save the figure
+    Enhanced diffusion coefficient convergence plotting
+    Combines functionality from both implementations
     """
-    plt.figure(figsize=(10, 5))
-    plt.plot(D_history, 'b-', label='Predicted D')
-    plt.axhline(y=D_history[-1], color='r', linestyle='--', label='Final Value')
-    plt.xlabel('Iteration')
-    plt.ylabel('Diffusion Coefficient')
-    plt.title('Convergence of Diffusion Coefficient')
-    plt.legend()
-    plt.grid(True)
-    if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path)
-    plt.close()
+    os.makedirs(save_dir, exist_ok=True)
 
-def plot_loss_history(loss_history: List[Dict[str, float]], save_path: str = None) -> None:
-    """
-    Plot training loss history
+    # Save data if requested
+    if save_data:
+        d_df = pd.DataFrame({
+            'iteration': range(len(d_history)),
+            'value': d_history
+        })
+        d_df.to_csv(os.path.join(save_dir, 'd_history.csv'), index=False)
 
-    Args:
-        loss_history: List of dictionaries containing loss components
-        save_path: Optional path to save the figure
-    """
-    if not loss_history:
-        print("Error: loss_history is empty")
-        return
+    # Create plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(range(len(d_history)), d_history, 'b-', label='Predicted D')
+    ax.axhline(y=d_history[-1], color='r', linestyle='--', label='Final Value')
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('Diffusion Coefficient')
+    ax.set_title('Convergence of Diffusion Coefficient')
+    ax.legend()
+    ax.grid(True)
 
-    print(f"Number of epochs recorded: {len(loss_history)}")
-    print("Keys in loss dictionary:", loss_history[0].keys())
-
-    plt.figure(figsize=(12, 6))
-
-    epochs = range(len(loss_history))
-    components = ['initial', 'boundary', 'interior', 'physics', 'total']
-
-    for component in components:
-        try:
-            values = [loss[component] for loss in loss_history]
-            plt.semilogy(epochs, values, label=component)
-            print(f"Successfully plotted {component} loss")
-        except KeyError:
-            print(f"Warning: Could not find {component} loss in history")
-        except Exception as e:
-            print(f"Error plotting {component} loss: {str(e)}")
-
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss (log scale)')
-    plt.title('Training Loss History')
-    plt.legend()
-    plt.grid(True)
-    if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path)
-    plt.close()
+    # Save plot
+    fig.savefig(os.path.join(save_dir, 'd_convergence.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig)
