@@ -4,7 +4,7 @@ matplotlib.use('Agg')  # Must be called before importing plt
 import matplotlib.pyplot as plt
 import os
 
-def plot_loss_history(losses, save_dir='plots'):
+def plot_loss_history(losses, save_dir='results'):
     """
     Plot training loss history for cluster environment
     
@@ -41,7 +41,7 @@ def plot_loss_history(losses, save_dir='plots'):
     fig.savefig(os.path.join(save_dir, 'loss_history.png'), dpi=300, bbox_inches='tight')
     plt.close(fig)
 
-def plot_d_convergence(d_history, save_dir='plots'):
+def plot_d_convergence(d_history, save_dir='results'):
     """
     Plot D parameter convergence for cluster environment
     
@@ -72,22 +72,3 @@ def plot_d_convergence(d_history, save_dir='plots'):
     # Save plot
     fig.savefig(os.path.join(save_dir, 'd_convergence.png'), dpi=300, bbox_inches='tight')
     plt.close(fig)
-
-if __name__ == "__main__":
-    try:
-        # This part is for when running plot_results.py directly
-        df = pd.read_csv('plots/loss_data.csv')
-        d_df = pd.read_csv('plots/d_history.csv')
-        
-        losses = {}
-        for col in df.columns:
-            if col != 'epoch':
-                losses[col] = df[col].tolist()
-                
-        plot_loss_history(losses)
-        plot_d_convergence(d_df['value'].tolist())
-        print("\nPlotting completed successfully!")
-    except Exception as e:
-        print(f"Error occurred: {str(e)}")
-        import traceback
-        traceback.print_exc()
