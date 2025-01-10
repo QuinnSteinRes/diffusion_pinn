@@ -1,9 +1,14 @@
 import matplotlib
-matplotlib.use('TkAgg')
+import os
+# Remove or comment out the TkAgg line:
+# matplotlib.use('TkAgg')  
+# Instead, we'll add:
+matplotlib.use('Agg')  # This will work on both cluster and local
 import matplotlib.pyplot as plt
 from typing import List, Dict
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
 
 def plot_solutions_and_error(pinn: 'DiffusionPINN',
                            data_processor: 'DiffusionDataProcessor',
