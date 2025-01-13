@@ -16,8 +16,10 @@ setup(
     long_description_content_type="text/markdown",
     author="Quinn Stein",
     author_email="qs8@hw.ac.uk",
-    packages=find_packages(where="src"),
+    # Change these two lines to find packages directly in src
+    packages=find_packages("src"),
     package_dir={"": "src"},
+    package_data={"": ["*.json", "*.mat", "*.csv"]},
     python_requires=">=3.8",
     install_requires=required,
     classifiers=[
