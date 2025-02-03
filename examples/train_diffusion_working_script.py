@@ -1,3 +1,8 @@
+"""
+This script is currently working on local linux machine.
+Tested Friday 31st Jan 25, on commit 7530074
+"""
+
 import matplotlib
 import sys
 import os
