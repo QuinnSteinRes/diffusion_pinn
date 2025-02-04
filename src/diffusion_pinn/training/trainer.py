@@ -56,7 +56,8 @@ def train_pinn(pinn: 'DiffusionPINN',
                data: Dict[str, tf.Tensor],
                optimizer: tf.keras.optimizers.Optimizer,
                epochs: int = 100,
-               save_dir: str = None) -> Tuple[List[float], List[Dict[str, float]]]:
+               save_dir: str = None,
+               checkpoint_frequency: int = 1000) -> Tuple[List[float], List[Dict[str, float]]]:
     """
     Training function with interrupt handling and intermediate plotting
 
@@ -66,6 +67,7 @@ def train_pinn(pinn: 'DiffusionPINN',
         optimizer: TensorFlow optimizer
         epochs: Number of training epochs
         save_dir: Optional directory to save model checkpoints
+        checkpoint_frequency: How often to save checkpoints
 
     Returns:
         Tuple of (diffusion coefficient history, loss history)
@@ -127,6 +129,9 @@ def train_pinn(pinn: 'DiffusionPINN',
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
+        if save_dir:
+            save_checkpoint(pinn, save_dir, epoch)
+        return D_history, loss_history
 
     return D_history, loss_history
 
