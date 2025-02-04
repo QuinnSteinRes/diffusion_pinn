@@ -8,9 +8,12 @@ with open('requirements.txt') as f:
 with open('README.md', 'r', encoding='utf-8') as f:
     long_description = f.read()
 
+# In setup.py
+from diffusion_pinn import __version__
+
 setup(
     name="diffusion_pinn",
-    version="0.1.0",
+    version=__version__,
     description="Physics-Informed Neural Network for Diffusion Problems",
     long_description=long_description,
     long_description_content_type="text/markdown",
