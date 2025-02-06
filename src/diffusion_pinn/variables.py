@@ -1,6 +1,5 @@
 """
 Configuration variables for PINN training
-Save as variables.py in your project
 """
 
 PINN_VARIABLES = {
