@@ -10,7 +10,7 @@ with open('README.md', 'r', encoding='utf-8') as f:
 
 setup(
     name="diffusion_pinn",
-    version="0.2.0",
+    version="0.2.1",
     description="Physics-Informed Neural Network for Diffusion Problems",
     long_description=long_description,
     long_description_content_type="text/markdown",

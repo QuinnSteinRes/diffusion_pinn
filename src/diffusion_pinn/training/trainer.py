@@ -34,8 +34,8 @@ def create_and_initialize_pinn(inputfile: str,
 
     # Create PINN configuration
     config = DiffusionConfig(
-        hidden_layers=[40, 40, 40],  # Reduced from [40, 40, 40, 40, 40]
-        activation='tanh',
+        #hidden_layers=[40, 40, 40],  # Reduced from [40, 40, 40, 40, 40]
+        #activation='tanh',
         diffusion_trainable=True,
         use_physics_loss=True
     )
@@ -78,7 +78,7 @@ def train_pinn(pinn: 'DiffusionPINN',
 
     try:
         for epoch in range(epochs):
-            if epoch % 100 == 0:
+            if epoch % 10 == 0:
                 # Clear memory
                 tf.keras.backend.clear_session()
 

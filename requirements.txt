@@ -3,6 +3,6 @@ numpy>=1.19.2
 scipy>=1.7.0
 matplotlib>=3.4.0
 pyDOE>=0.3.8
-
 typing>=3.7.4
 pytest>=6.2.5  # for running tests
+psutil>=5.8.0  # for memory monitoring

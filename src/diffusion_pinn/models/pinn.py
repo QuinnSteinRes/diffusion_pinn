@@ -130,24 +130,28 @@ class DiffusionPINN(tf.Module):
 
     @tf.function
     def compute_pde_residual(self, x_f: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual"""
-        with tf.GradientTape(persistent=True) as tape2:
-            tape2.watch(x_f)
-            with tf.GradientTape(persistent=True) as tape1:
-                tape1.watch(x_f)
-                c = self.forward_pass(x_f)
+        try:
+            with tf.GradientTape(persistent=True) as tape2:
+                tape2.watch(x_f)
+                with tf.GradientTape(persistent=True) as tape1:
+                    tape1.watch(x_f)
+                    c = self.forward_pass(x_f)
 
-            dc_dxyt = tape1.gradient(c, x_f)
-            dc_dt = dc_dxyt[..., 2:3]
-            dc_dx = dc_dxyt[..., 0:1]
-            dc_dy = dc_dxyt[..., 1:2]
+                dc_dxyt = tape1.gradient(c, x_f)
+                dc_dt = dc_dxyt[..., 2:3]
+                dc_dx = dc_dxyt[..., 0:1]
+                dc_dy = dc_dxyt[..., 1:2]
 
-        d2c_dx2 = tape2.gradient(dc_dx, x_f)[..., 0:1]
-        d2c_dy2 = tape2.gradient(dc_dy, x_f)[..., 1:2]
+            d2c_dx2 = tape2.gradient(dc_dx, x_f)[..., 0:1]
+            d2c_dy2 = tape2.gradient(dc_dy, x_f)[..., 1:2]
 
-        del tape1, tape2
+            del tape1, tape2  # Explicit cleanup
 
-        return dc_dt - self.D * (d2c_dx2 + d2c_dy2)
+            return dc_dt - self.D * (d2c_dx2 + d2c_dy2)
+        except Exception as e:
+            print(f"Error in PDE residual computation: {str(e)}")
+            raise
+
 
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,
                 x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
