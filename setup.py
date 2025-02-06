@@ -19,7 +19,7 @@ setup(
     # Change these two lines to find packages directly in src
     packages=find_packages("src"),
     package_dir={"": "src"},
-    package_data={"": ["*.json", "*.mat", "*.csv"]},
+    package_data={"": ["*.json", "*.mat", "*.csv", "*.py"]},
     python_requires=">=3.8",
     install_requires=required,
     classifiers=[
