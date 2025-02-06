@@ -2,12 +2,13 @@ import tensorflow as tf
 from typing import Dict, List, Tuple
 import os
 import json
+from ..variables import PINN_VARIABLES
 
 def create_and_initialize_pinn(inputfile: str,
-                             N_u: int,
-                             N_f: int,
-                             N_i: int,
-                             initial_D: float = 1.0) -> Tuple['DiffusionPINN', Dict[str, tf.Tensor]]:
+                             N_u: int = PINN_VARIABLES['N_u'],
+                             N_f: int = PINN_VARIABLES['N_f'],
+                             N_i: int = PINN_VARIABLES['N_i'],
+                             initial_D: float = PINN_VARIABLES['initial_D']) -> Tuple['DiffusionPINN', Dict[str, tf.Tensor]]:
     """
     Create and initialize PINN with data
 

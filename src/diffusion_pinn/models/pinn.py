@@ -3,26 +3,17 @@ import numpy as np
 from typing import List, Tuple, Dict
 
 from ..config import DiffusionConfig
+from ..variables import PINN_VARIABLES
 
 class DiffusionPINN(tf.Module):
     """Physics-Informed Neural Network for diffusion problems"""
-
     def __init__(
         self,
         spatial_bounds: Dict[str, Tuple[float, float]],
         time_bounds: Tuple[float, float],
-        initial_D: float = 1.0,
+        initial_D: float = PINN_VARIABLES['initial_D'],
         config: DiffusionConfig = None
     ):
-        """
-        Initialize the Diffusion PINN
-
-        Args:
-            spatial_bounds: Dictionary with 'x' and 'y' bounds as tuples
-            time_bounds: Tuple of (t_min, t_max)
-            initial_D: Initial guess for diffusion coefficient
-            config: Network configuration
-        """
         super().__init__()
         self.config = config or DiffusionConfig()
 
@@ -42,13 +33,8 @@ class DiffusionPINN(tf.Module):
                            trainable=self.config.diffusion_trainable,
                            name='diffusion_coefficient')
 
-        # Store loss weights
-        self.loss_weights = {
-            'initial': 1.0,
-            'boundary': 1.0,
-            'interior': 10.0,
-            'physics': 5.0
-        }
+        # Store loss weights from variables
+        self.loss_weights = PINN_VARIABLES['loss_weights']
 
         # Initialize tolerances for condition identification
         self.boundary_tol = 1e-6

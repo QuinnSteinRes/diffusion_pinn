@@ -1,14 +1,12 @@
 from typing import List
 from dataclasses import dataclass, field
 from pathlib import Path
+from .variables import PINN_VARIABLES
 
 def get_project_root() -> Path:
     """Get the absolute path to the project root directory."""
     return Path(__file__).parent.parent.parent
 
-def default_hidden_layers() -> List[int]:
-    """Default hidden layer configuration"""
-    return [20, 20, 20]
 
 @dataclass
 class DiffusionConfig:
@@ -21,8 +19,8 @@ class DiffusionConfig:
         diffusion_trainable: Whether to train the diffusion coefficient
         use_physics_loss: Whether to use physics-informed loss term
     """
-    hidden_layers: List[int] = field(default_factory=default_hidden_layers)
-    activation: str = 'tanh'
+    hidden_layers: List[int] = field(default_factory=lambda: PINN_VARIABLES['hidden_layers'])
+    activation: str = PINN_VARIABLES['activation']
     initialization: str = 'glorot'
     diffusion_trainable: bool = True
     use_physics_loss: bool = True
