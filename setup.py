@@ -10,16 +10,15 @@ with open('README.md', 'r', encoding='utf-8') as f:
 
 setup(
     name="diffusion_pinn",
-    version="0.2.1",
+    version="0.2.2",  # Increment version
     description="Physics-Informed Neural Network for Diffusion Problems",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Quinn Stein",
     author_email="qs8@hw.ac.uk",
-    # Change these two lines to find packages directly in src
     packages=find_packages("src"),
     package_dir={"": "src"},
-    package_data={"": ["*.json", "*.mat", "*.csv", "*.py"]},
+    package_data={"": ["*.json", "*.mat", "*.csv", "*.py"]},  # Ensure .py files are included
     python_requires=">=3.8",
     install_requires=required,
     classifiers=[
