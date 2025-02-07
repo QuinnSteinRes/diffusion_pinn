@@ -1,17 +1,17 @@
-"""
-This script is currently working on local linux machine.
-Tested Friday 31st Jan 25, on commit 7530074
-"""
-
 import matplotlib
 import sys
+print("Python path:", sys.path)
+import diffusion_pinn
+print("diffusion_pinn location:", diffusion_pinn.__file__)
+from diffusion_pinn.training import train_pinn
+print("train_pinn location:", train_pinn.__code__.co_filename)
 import os
 from pathlib import Path
 import argparse
-import diffusion_pinn
 import tensorflow as tf
 import pandas as pd
 import numpy as np
+from diffusion_pinn.variables import PINN_VARIABLES
 
 # Only use 'Agg' backend when running without display
 if not sys.stdout.isatty():
@@ -104,18 +104,18 @@ def main(args):
     # Create and initialize PINN
     pinn, data = create_and_initialize_pinn(
         inputfile=processed_file,
-        N_u=1000,
-        N_f=20000,
-        N_i=10000,
-        initial_D=1.0
+        N_u=PINN_VARIABLES['N_u'],
+        N_f=PINN_VARIABLES['N_f'],
+        N_i=PINN_VARIABLES['N_i'],
+        initial_D=PINN_VARIABLES['initial_D']
     )
     
     # Create optimizer with learning rate decay
     optimizer = tf.keras.optimizers.Adam(
         learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=0.001,
-            decay_steps=1000,
-            decay_rate=0.95
+            initial_learning_rate=PINN_VARIABLES['learning_rate'],
+            decay_steps=PINN_VARIABLES['decay_steps'],
+            decay_rate=PINN_VARIABLES['decay_rate']
         )
     )
     
@@ -172,7 +172,7 @@ if __name__ == "__main__":
                       help='Path to input CSV file')
     parser.add_argument('--output-dir', type=str, default='.',
                       help='Base directory for output')
-    parser.add_argument('--epochs', type=int, default=60000,
+    parser.add_argument('--epochs', type=int, default=PINN_VARIABLES['epochs'],
                       help='Number of training epochs')
     
     args = parser.parse_args()
