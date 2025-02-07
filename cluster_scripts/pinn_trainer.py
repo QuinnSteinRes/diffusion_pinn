@@ -31,39 +31,38 @@ def preprocess_data(input_file):
     """Preprocess the CSV data with known columns: x, y, t, intensity"""
     # Read using numpy
     data = np.genfromtxt(input_file, delimiter=',', names=True)
-    
+
     # Verify columns
     expected_columns = ['x', 'y', 't', 'intensity']
     if not all(col in data.dtype.names for col in expected_columns):
         raise ValueError(f"CSV must contain columns: {', '.join(expected_columns)}")
-    
+
     # Save temporary processed file
     temp_file = input_file.replace('.csv', '_processed.csv')
-    
+
     # Save header
     with open(temp_file, 'w') as f:
         f.write('x,y,t,intensity\n')
-    
+
     # Save data
     with open(temp_file, 'ab') as f:
-        np.savetxt(f, 
+        np.savetxt(f,
                    np.column_stack((data['x'], data['y'], data['t'], data['intensity'])),
                    delimiter=',',
                    fmt='%.8f')
-    
+
     return temp_file
 
 def setup_directories(base_dir):
     """Create and return directory paths for outputs"""
     results_dir = os.path.join(base_dir, "results")
     plot_dir = os.path.join(base_dir, "plots")
-    save_dir = os.path.join(base_dir, "saved_models")
-    
+
     # Create directories
     for dir_path in [results_dir, plot_dir, save_dir]:
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
-        
+
     return results_dir, plot_dir, save_dir
 
 def save_summary(base_dir, D_final, loss_history):
@@ -77,11 +76,11 @@ def save_summary(base_dir, D_final, loss_history):
             'min_loss': [np.min(loss_history)],
             'max_loss': [np.max(loss_history)]
         }
-        
+
         # Save to CSV
         summary_file = os.path.join(base_dir, "training_summary.csv")
         pd.DataFrame(summary_data).to_csv(summary_file, index=False)
-            
+
     except Exception as e:
         print("Warning: Could not save summary statistics:")
         print(str(e))
@@ -89,18 +88,18 @@ def save_summary(base_dir, D_final, loss_history):
 def main(args):
     print("\nStarting training")
     print("Input file:", args.input_file)
-    
+
     # Create configuration
     config = DiffusionConfig()
-    
+
     # Setup directories
     results_dir, plot_dir, save_dir = setup_directories(args.output_dir)
-    
+
     print("Output directory: {}".format(args.output_dir))
-    
+
     # Preprocess the input data
     processed_file = preprocess_data(args.input_file)
-    
+
     # Create and initialize PINN
     pinn, data = create_and_initialize_pinn(
         inputfile=processed_file,
@@ -109,7 +108,7 @@ def main(args):
         N_i=PINN_VARIABLES['N_i'],
         initial_D=PINN_VARIABLES['initial_D']
     )
-    
+
     # Create optimizer with learning rate decay
     optimizer = tf.keras.optimizers.Adam(
         learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(
@@ -118,7 +117,7 @@ def main(args):
             decay_rate=PINN_VARIABLES['decay_rate']
         )
     )
-    
+
     # Train the model
     print("Starting training...")
     D_history, loss_history = train_pinn(
@@ -128,18 +127,18 @@ def main(args):
         epochs=args.epochs,
         save_dir=str(save_dir)
     )
-    
+
     # Save plots
     try:
         import matplotlib.pyplot as plt
         plot_loss_history(loss_history)
         plt.savefig(os.path.join(plot_dir, 'loss_history.png'))
         plt.close()
-        
+
         plot_diffusion_convergence(D_history)
         plt.savefig(os.path.join(plot_dir, 'd_convergence.png'))
         plt.close()
-        
+
         # Plot solutions
         data_processor = DiffusionDataProcessor(processed_file)
         t_indices = [0, len(data_processor.t)//3, 2*len(data_processor.t)//3, -1]
@@ -152,17 +151,17 @@ def main(args):
     except Exception as e:
         print("Warning: Error during plotting:")
         print(str(e))
-    
+
     # Save summary
     final_D = pinn.get_diffusion_coefficient()
     save_summary(args.output_dir, final_D, loss_history)
-    
+
     # Clean up processed file
     try:
         os.remove(processed_file)
     except:
         pass
-    
+
     print("\nTraining completed")
     print("Final diffusion coefficient: {}".format(final_D))
 
@@ -174,6 +173,6 @@ if __name__ == "__main__":
                       help='Base directory for output')
     parser.add_argument('--epochs', type=int, default=PINN_VARIABLES['epochs'],
                       help='Number of training epochs')
-    
+
     args = parser.parse_args()
     main(args)

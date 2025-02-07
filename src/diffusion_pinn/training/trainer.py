@@ -108,8 +108,9 @@ def train_pinn(pinn: 'DiffusionPINN',
                 D_history.append(pinn.get_diffusion_coefficient())
                 loss_history.append({k: v.numpy() for k, v in losses.items()})
 
-                if save_dir and epoch % checkpoint_frequency == 0:
-                    save_checkpoint(pinn, save_dir, epoch)
+                # Model saving disabled to conserve resources
+                # if save_dir and epoch % checkpoint_frequency == 0:
+                #     save_checkpoint(pinn, save_dir, epoch)
 
                 if epoch % 100 == 0:
                     print(f"\nEpoch {epoch}")
@@ -119,20 +120,16 @@ def train_pinn(pinn: 'DiffusionPINN',
 
             except tf.errors.ResourceExhaustedError:
                 print("\nOut of memory error encountered. Saving current progress...")
-                if save_dir:
-                    save_checkpoint(pinn, save_dir, epoch)
                 return D_history, loss_history
             except Exception as e:
                 print(f"\nError during training iteration: {str(e)}")
-                if save_dir:
-                    save_checkpoint(pinn, save_dir, epoch)
                 return D_history, loss_history
+
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
-        if save_dir:
-            save_checkpoint(pinn, save_dir, epoch)
         return D_history, loss_history
+
 
     return D_history, loss_history
 
