@@ -12,7 +12,7 @@ PINN_VARIABLES = {
     'learning_rate': 0.001,
     'decay_steps': 1000,
     'decay_rate': 0.95,
-    'initial_D': 0.001,
+    'initial_D': 1.0,
 
     # Sampling Points
     'N_u': 1000,    # boundary points
