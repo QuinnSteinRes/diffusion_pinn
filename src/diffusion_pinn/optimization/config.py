@@ -1,112 +1,99 @@
 # src/diffusion_pinn/optimization/config.py
 
 """
-Configuration settings for PINN optimization, following the original structure
-from trainingBayesian 1.py
+Centralized configuration settings for PINN optimization
 """
 
 OPTIMIZATION_SETTINGS = {
-    ##### CASE #####
-    "inputFile"                 : "src/diffusion_pinn/data/intensity_time_series_spatial_temporal.csv",
-    "resultFolder"             : "trainingResults",
+    ##### INPUT/OUTPUT SETTINGS #####
+    "inputFile": "intensity_time_series_spatial_temporal.csv",
+    "resultFolder": "trainingResults",
 
     ##### DATA PREPROCESSING SETTINGS #####
-    # Centering and scaling options
-    "centering_method"         : "mean",
-    "scaling_method"           : "auto",
-    # Percentage of input data to be used for training
-    "training_ratio"           : 70,  # %
+    "centering_method": "mean",
+    "scaling_method": "auto",
+    "training_ratio": 70,  # %
 
-    ##### ANN AND OPTIMIZER SETTINGS #####
-    # Number of epochs for the ANN
-    "network_epochs"           : 500,
-    # Number of iterations for the optimizer
-    "iterations_optimizer"     : 30,
-    # Acquisition function to be utilized
-    "acquisitionFunction"      : "EI",
-    # Settings for the first iteration of the optimizer
-    "initial_neurons"          : 16,
-    "initial_layers"           : 1,
-    "initial_activation"       : "tanh",
-    "initial_learningRate"     : 1e-4,
-    # Loss
-    "lossFunction"             : "mae",
+    ##### OPTIMIZER SETTINGS #####
+    # Number of iterations for the Bayesian optimizer
+    "iterations_optimizer": 30,
+    # Acquisition function for Bayesian optimization
+    "acquisitionFunction": "EI",
+    # Number of random starts (as fraction of total iterations)
+    "random_starts_fraction": 0.3,
+
+    ##### NEURAL NETWORK TRAINING SETTINGS #####
+    # Number of epochs for each trial
+    "network_epochs": 500,
     # Batch size
-    "batchSize"               : 32,
+    "batchSize": 64,  # Increased from 32
+    # Loss function
+    "lossFunction": "mae",
+    # Early stopping patience
+    "earlyStop_patience": 8,
+    # Learning rate scheduler factor
+    "lr_reduction_factor": 0.5,
+    # Learning rate scheduler patience
+    "lr_patience": 3,
 
-    ##### DESIGN SPACE SETTINGS #####
-    # Lower and upper bound for number of layers
-    "layers_lowerBound"        : 1,
-    "layers_upperBound"        : 25,
-    # Lower and upper bound for number of neurons
-    "neurons_lowerBound"       : 5,
-    "neurons_upperBound"       : 512,
-    # Lower and upper bound for learning rate
-    "learning_lowerBound"      : 1e-8,
-    "learning_upperBound"      : 1e-3,
+    ##### INITIAL PARAMETER VALUES #####
+    "initial_neurons": 16,
+    "initial_layers": 1,
+    "initial_activation": "tanh",
+    "initial_learningRate": 1e-4,
 
-    ##### OTHER UTILITIES #####
-    "plot_results"             : True,
-    "save_model"              : True,
-    # Early stop to avoid overfit
-    "earlyStop_patience"       : 5,
+    ##### PARAMETER SEARCH RANGES #####
+    # Layers search range
+    "layers_lowerBound": 1,
+    "layers_upperBound": 10,  # Reduced from 25
+    # Neurons search range
+    "neurons_lowerBound": 5,
+    "neurons_upperBound": 256,  # Reduced from 512
+    # Learning rate search range
+    "learning_lowerBound": 1e-6,  # Increased from 1e-8
+    "learning_upperBound": 1e-4,  # Reduced from 1e-3
 
-    ##### PHYSICS-INFORMED SETTINGS #####
-    "dimension"                : 3,
-    "code_debugging"           : True,
-    "enforce_realizability"    : False,
-    "num_realizability_its"    : 5,
-    "capping"                 : False,
-    "cappingValue"            : 1e+6,
-    "timeScale"               : 1
+    ##### STABILITY ENHANCEMENTS #####
+    # L2 regularization strength
+    "regularization_strength": 1e-5,
+    # Gradient clipping norm
+    "gradient_clip_norm": 1.0,
+    # Gradient clipping value
+    "gradient_clip_value": 0.5,
+    # Max weight value to prevent extreme weights
+    "max_weight_value": 10.0,
+    # Output clipping to prevent extreme predictions
+    "output_clip_min": -1e6,
+    "output_clip_max": 1e6,
+
+    ##### PINN SAMPLING POINTS #####
+    "N_u": 1000,    # boundary points
+    "N_f": 20000,   # collocation points
+    "N_i": 10000,   # interior points
+
+    ##### LOSS WEIGHTS #####
+    "loss_weights": {
+        "data": 1.0,
+        "initial": 1.0,
+        "boundary": 1.0,
+        "physics": 5.0
+    },
+
+    ##### ADVANCED SETTINGS #####
+    "dimension": 3,
+    "code_debugging": True,
+    "plot_results": True,
+    "save_model": True,
+    "checkpoint_interval": 5  # Save checkpoints every N iterations
 }
 
-# For easier access to common settings groups
-def get_network_settings():
-    """Get neural network related settings"""
-    return {
-        "initial_neurons": OPTIMIZATION_SETTINGS["initial_neurons"],
-        "initial_layers": OPTIMIZATION_SETTINGS["initial_layers"],
-        "initial_activation": OPTIMIZATION_SETTINGS["initial_activation"],
-        "initial_learningRate": OPTIMIZATION_SETTINGS["initial_learningRate"],
-        "network_epochs": OPTIMIZATION_SETTINGS["network_epochs"],
-        "batchSize": OPTIMIZATION_SETTINGS["batchSize"],
-        "lossFunction": OPTIMIZATION_SETTINGS["lossFunction"]
-    }
+def get_config():
+    """Get a copy of the configuration settings"""
+    import copy
+    return copy.deepcopy(OPTIMIZATION_SETTINGS)
 
-def get_optimization_bounds():
-    """Get bounds for optimization parameters"""
-    return {
-        "layers": (
-            OPTIMIZATION_SETTINGS["layers_lowerBound"],
-            OPTIMIZATION_SETTINGS["layers_upperBound"]
-        ),
-        "neurons": (
-            OPTIMIZATION_SETTINGS["neurons_lowerBound"],
-            OPTIMIZATION_SETTINGS["neurons_upperBound"]
-        ),
-        "learning_rate": (
-            OPTIMIZATION_SETTINGS["learning_lowerBound"],
-            OPTIMIZATION_SETTINGS["learning_upperBound"]
-        )
-    }
-
-def get_data_settings():
-    """Get data processing related settings"""
-    return {
-        "centering_method": OPTIMIZATION_SETTINGS["centering_method"],
-        "scaling_method": OPTIMIZATION_SETTINGS["scaling_method"],
-        "training_ratio": OPTIMIZATION_SETTINGS["training_ratio"],
-        "dimension": OPTIMIZATION_SETTINGS["dimension"]
-    }
-
-def get_physics_settings():
-    """Get physics-related settings"""
-    return {
-        "dimension": OPTIMIZATION_SETTINGS["dimension"],
-        "enforce_realizability": OPTIMIZATION_SETTINGS["enforce_realizability"],
-        "num_realizability_its": OPTIMIZATION_SETTINGS["num_realizability_its"],
-        "capping": OPTIMIZATION_SETTINGS["capping"],
-        "cappingValue": OPTIMIZATION_SETTINGS["cappingValue"],
-        "timeScale": OPTIMIZATION_SETTINGS["timeScale"]
-    }
+def update_config(updates):
+    """Update configuration with custom values"""
+    config = get_config()
+    config.update(updates)
+    return config
