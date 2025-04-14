@@ -8,11 +8,11 @@ PINN_VARIABLES = {
     'activation': 'tanh',
 
     # Training Parameters
-    'epochs': 50001,
-    'learning_rate': 0.001, #0.0005, # 0.2.7 0.001
-    'decay_steps': 1000, #2000, # 0.2.7 1000
-    'decay_rate': 0.95, #0.90,  # 0.2.7 0.95
-    'initial_D': 0.001, #0.0005, # 0.2.7 0.001
+    'epochs': 20000,
+    'learning_rate': 0.0005, #0.0005, # 0.2.7 0.001
+    'decay_steps': 2000, #2000, # 0.2.7 1000
+    'decay_rate': 0.90, #0.90,  # 0.2.7 0.95
+    'initial_D': 0.0005, #0.0005, # 0.2.7 0.001
 
     # Sampling Points
     'N_u': 2000,    # boundary points       0.2.7 1000
@@ -24,6 +24,6 @@ PINN_VARIABLES = {
         'initial': 1.0,
         'boundary': 1.0,
         'interior': 10.0,
-        'physics': 5 #10.0    #0.2.7 5.0
+        'physics': 10 #10.0    #0.2.7 5.0
     }
 }
