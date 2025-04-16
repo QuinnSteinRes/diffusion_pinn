@@ -4,7 +4,7 @@ Configuration variables for PINN training
 
 PINN_VARIABLES = {
     # Network Architecture
-    'hidden_layers': [40, 40, 40, 40, 40], # 0.2.7 [40, 40, 40]
+    'hidden_layers': [30, 30, 30], # 0.2.7 [40, 40, 40]
     'activation': 'tanh',
 
     # Training Parameters
