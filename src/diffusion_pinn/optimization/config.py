@@ -24,7 +24,7 @@ OPTIMIZATION_SETTINGS = {
 
     ##### NEURAL NETWORK TRAINING SETTINGS #####
     # Number of epochs for each trial
-    "network_epochs": 500,
+    "network_epochs": 10000,
     # Batch size
     "batchSize": 64,  # Increased from 32
     # Loss function
