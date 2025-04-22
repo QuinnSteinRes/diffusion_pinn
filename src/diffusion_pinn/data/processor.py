@@ -187,45 +187,47 @@ class DiffusionDataProcessor:
             gc.collect()
 
     def prepare_training_data(self, N_u: int, N_f: int, N_i: int,
-                        temporal_density: int = 10) -> Dict[str, tf.Tensor]:
+                            temporal_density: int = 10) -> Dict[str, tf.Tensor]:
         """
-        Prepare training data for the PINN with improved memory management
+        Prepare training data for the PINN
+
+        Args:
+            N_u: Number of boundary points
+            N_f: Number of collocation points
+            N_i: Number of interior points with direct supervision
+            temporal_density: Number of time points to generate between each frame
+
+        Returns:
+            Dictionary containing training data tensors
         """
         try:
             # Get boundary and interior points
             all_coords, all_values = self.get_boundary_and_interior_points()
 
-            # Use smaller batches for collocation points to avoid memory spikes
-            batch_size = min(5000, N_f // 10)  # Process in smaller chunks
-            X_f_train = []
+            # Separate boundary and interior points
+            t = all_coords[:, 2]
+            x = all_coords[:, 0]
+            y = all_coords[:, 1]
 
-            # Generate denser temporal sampling but with memory management
-            t_dense = np.linspace(self.t.min(), self.t.max(),
-                                min(len(self.t) * temporal_density, 100))  # Cap maximum time points
+            # Create masks for different types of points
+            boundary_mask = np.logical_or.reduce([
+                np.abs(x - self.x.min()) < 1e-6,
+                np.abs(x - self.x.max()) < 1e-6,
+                np.abs(y - self.y.min()) < 1e-6,
+                np.abs(y - self.y.max()) < 1e-6
+            ])
 
-            N_f_per_t = N_f // len(t_dense)
+            interior_mask = ~boundary_mask
 
-            for t_idx in range(0, len(t_dense), batch_size):
-                t_batch = t_dense[t_idx:t_idx + batch_size]
-                batch_points = []
+            # Count true values in masks
+            n_boundary = np.sum(boundary_mask)
+            n_interior = np.sum(interior_mask)
 
-                for t_val in t_batch:
-                    # Use smaller chunks for each time step
-                    xy_points = self.lb[0:2] + (self.ub[0:2]-self.lb[0:2]) * lhs(2, N_f_per_t)
-                    t_points = np.ones((N_f_per_t, 1)) * t_val
-                    batch_points.append(np.hstack((xy_points, t_points)))
-
-                X_f_train.append(np.vstack(batch_points))
-                # Clear batch data
-                del batch_points
-                gc.collect()
-
-            # Stack all batches
-            X_f_train = np.vstack(X_f_train)
-
-            # Use sampling for boundary and interior points
-            boundary_indices = np.random.choice(np.where(boundary_mask)[0], min(N_u, len(boundary_mask)), replace=len(boundary_mask) < N_u)
-            interior_indices = np.random.choice(np.where(interior_mask)[0], min(N_i, len(interior_mask)), replace=len(interior_mask) < N_i)
+            # Sample points
+            boundary_indices = np.random.choice(np.where(boundary_mask)[0], min(N_u, n_boundary),
+                                            replace=(N_u > n_boundary))
+            interior_indices = np.random.choice(np.where(interior_mask)[0], min(N_i, n_interior),
+                                            replace=(N_i > n_interior))
 
             X_u_train = all_coords[boundary_indices]
             u_train = all_values[boundary_indices]
@@ -233,16 +235,47 @@ class DiffusionDataProcessor:
             X_i_train = all_coords[interior_indices]
             u_i_train = all_values[interior_indices]
 
-            # Convert to TensorFlow tensors with explicit dtype
+            # Generate dense temporal collocation points
+            t_dense = np.linspace(self.t.min(), self.t.max(),
+                                len(self.t) * temporal_density)
+
+            # Generate collocation points with denser temporal sampling
+            N_f_per_t = N_f // len(t_dense)
+            X_f_train = []
+
+            # Process collocation points in batches
+            batch_size = max(1, len(t_dense) // 4)
+            for t_start in range(0, len(t_dense), batch_size):
+                t_end = min(t_start + batch_size, len(t_dense))
+                batch_t = t_dense[t_start:t_end]
+
+                for t_val in batch_t:
+                    xy_points = self.lb[0:2] + (self.ub[0:2]-self.lb[0:2])*lhs(2, N_f_per_t)
+                    t_points = np.ones((N_f_per_t, 1)) * t_val
+                    X_f_train.append(np.hstack((xy_points, t_points)))
+
+                gc.collect()
+
+            X_f_train = np.vstack(X_f_train)
+            X_f_train = np.vstack((X_f_train, X_u_train, X_i_train))
+
+            # Convert to TensorFlow tensors
             return {
                 'X_u_train': tf.convert_to_tensor(X_u_train, dtype=tf.float32),
                 'u_train': tf.convert_to_tensor(u_train, dtype=tf.float32),
                 'X_i_train': tf.convert_to_tensor(X_i_train, dtype=tf.float32),
                 'u_i_train': tf.convert_to_tensor(u_i_train, dtype=tf.float32),
-                'X_f_train': tf.convert_to_tensor(X_f_train, dtype=tf.float32)
+                'X_f_train': tf.convert_to_tensor(X_f_train, dtype=tf.float32),
+                'X_u_test': tf.convert_to_tensor(self.X_u_test, dtype=tf.float32),
+                'u_test': tf.convert_to_tensor(self.u, dtype=tf.float32)
             }
+
+        except Exception as e:
+            print(f"Error preparing training data: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
         finally:
-            # Ensure cleanup
             gc.collect()
 
     def get_domain_info(self) -> Dict[str, Dict[str, Tuple[float, float]]]:
