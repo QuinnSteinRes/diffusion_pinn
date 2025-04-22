@@ -1,5 +1,6 @@
 import tensorflow as tf
 from typing import Dict, List, Tuple
+import numpy as np
 import os
 import json
 from ..variables import PINN_VARIABLES
