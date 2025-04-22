@@ -64,26 +64,8 @@ def train_pinn(pinn: 'DiffusionPINN',
     loss_history = []
 
     # Define acceptable range for diffusion coefficient
-    D_min = 0.001
+    D_min = 0.000010
     D_max = 0.1
-
-    # Create optimizer with warm-up and decay
-    if isinstance(optimizer, tf.keras.optimizers.Adam):
-        # Use cosine decay with warmup for better training stability
-        warmup_steps = min(500, epochs // 10)
-        decay_steps = max(1, epochs - warmup_steps)
-
-        def lr_schedule(epoch):
-            if epoch < warmup_steps:
-                return optimizer.learning_rate.initial_learning_rate * (epoch / warmup_steps)
-            else:
-                decay_epoch = epoch - warmup_steps
-                cosine_decay = 0.5 * (1 + np.cos(np.pi * decay_epoch / decay_steps))
-                return optimizer.learning_rate.initial_learning_rate * cosine_decay
-
-        # Apply scheduler if not already using a schedule
-        if not isinstance(optimizer.learning_rate, tf.keras.optimizers.schedules.LearningRateSchedule):
-            optimizer.learning_rate = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
 
     # Use two-phase training for better convergence
     try:
