@@ -54,84 +54,152 @@ def create_and_initialize_pinn(inputfile: str,
     return pinn, training_data
 
 def train_pinn(pinn: 'DiffusionPINN',
-               data: Dict[str, tf.Tensor],
-               optimizer: tf.keras.optimizers.Optimizer,
-               epochs: int = 100,
-               save_dir: str = None,
-               checkpoint_frequency: int = 1000) -> Tuple[List[float], List[Dict[str, float]]]:
-    """
-    Training function with interrupt handling and intermediate plotting
-
-    Args:
-        pinn: PINN model to train
-        data: Dictionary containing training data
-        optimizer: TensorFlow optimizer
-        epochs: Number of training epochs
-        save_dir: Optional directory to save model checkpoints
-        checkpoint_frequency: How often to save checkpoints
-
-    Returns:
-        Tuple of (diffusion coefficient history, loss history)
-    """
+              data: Dict[str, tf.Tensor],
+              optimizer: tf.keras.optimizers.Optimizer,
+              epochs: int = 100,
+              save_dir: str = None,
+              checkpoint_frequency: int = 1000) -> Tuple[List[float], List[Dict[str, float]]]:
+    """Training function with adaptive learning and constraints"""
     D_history = []
     loss_history = []
 
+    # Define acceptable range for diffusion coefficient
+    D_min = 0.001
+    D_max = 0.1
+
+    # Create optimizer with warm-up and decay
+    if isinstance(optimizer, tf.keras.optimizers.Adam):
+        # Use cosine decay with warmup for better training stability
+        warmup_steps = min(500, epochs // 10)
+        decay_steps = max(1, epochs - warmup_steps)
+
+        def lr_schedule(epoch):
+            if epoch < warmup_steps:
+                return optimizer.learning_rate.initial_learning_rate * (epoch / warmup_steps)
+            else:
+                decay_epoch = epoch - warmup_steps
+                cosine_decay = 0.5 * (1 + np.cos(np.pi * decay_epoch / decay_steps))
+                return optimizer.learning_rate.initial_learning_rate * cosine_decay
+
+        # Apply scheduler if not already using a schedule
+        if not isinstance(optimizer.learning_rate, tf.keras.optimizers.schedules.LearningRateSchedule):
+            optimizer.learning_rate = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
+
+    # Use two-phase training for better convergence
     try:
-        for epoch in range(epochs):
-            if epoch % 10 == 0:
-                # Clear memory
+        # Phase 1: Initial training with strong regularization
+        print("Phase 1: Initial training...")
+        phase1_epochs = min(epochs // 3, 1000)
+
+        for epoch in range(phase1_epochs):
+            if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            print(f"\rTraining progress: {epoch+1}/{epochs} epochs", end="", flush=True)
+            print(f"\rPhase 1: {epoch+1}/{phase1_epochs}", end="", flush=True)
 
-            try:
-                with tf.GradientTape() as tape:
-                    # Compute boundary/initial losses
-                    losses = pinn.loss_fn(
-                        x_data=data['X_u_train'],
-                        c_data=data['u_train'],
-                        x_physics=data['X_f_train']
-                    )
+            with tf.GradientTape() as tape:
+                # Compute losses
+                losses = pinn.loss_fn(
+                    x_data=data['X_u_train'],
+                    c_data=data['u_train'],
+                    x_physics=data['X_f_train']
+                )
 
-                    # Compute interior supervision loss
-                    c_pred_interior = pinn.forward_pass(data['X_i_train'])
-                    interior_loss = tf.reduce_mean(tf.square(c_pred_interior - data['u_i_train']))
-                    losses['interior'] = interior_loss
+                interior_loss = tf.reduce_mean(tf.square(
+                    pinn.forward_pass(data['X_i_train']) - data['u_i_train']
+                ))
+                losses['interior'] = interior_loss
 
-                    # Update total loss
-                    total_loss = losses['total'] + pinn.loss_weights['interior'] * interior_loss
-                    losses['total'] = total_loss
+                # Add L2 regularization for weights in phase 1
+                l2_loss = 0.0001 * sum(tf.reduce_sum(tf.square(w)) for w in pinn.weights)
 
-                gradients = tape.gradient(total_loss, pinn.get_trainable_variables())
-                optimizer.apply_gradients(zip(gradients, pinn.get_trainable_variables()))
+                # Strong weight on physics in phase 1
+                total_loss = (
+                    losses['total'] +
+                    pinn.loss_weights['interior'] * interior_loss +
+                    l2_loss
+                )
+                losses['total'] = total_loss
 
-                D_history.append(pinn.get_diffusion_coefficient())
-                loss_history.append({k: v.numpy() for k, v in losses.items()})
+            # Calculate and apply gradients
+            trainable_vars = pinn.get_trainable_variables()
+            gradients = tape.gradient(total_loss, trainable_vars)
 
-                # Model saving disabled to conserve resources
-                # if save_dir and epoch % checkpoint_frequency == 0:
-                #     save_checkpoint(pinn, save_dir, epoch)
+            # Apply gradient clipping
+            gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+            optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-                if epoch % 100 == 0:
-                    print(f"\nEpoch {epoch}")
-                    for key, value in losses.items():
-                        print(f"{key.capitalize()} loss: {value.numpy():.6f}")
-                    print(f"Current D = {D_history[-1]:.6f}\n")
+            # Enforce diffusion coefficient constraints
+            if pinn.config.diffusion_trainable:
+                D_value = pinn.D.numpy()
+                if D_value < D_min or D_value > D_max:
+                    constrained_D = np.clip(D_value, D_min, D_max)
+                    pinn.D.assign(constrained_D)
 
-            except tf.errors.ResourceExhaustedError:
-                print("\nOut of memory error encountered. Saving current progress...")
-                return D_history, loss_history
-            except Exception as e:
-                print(f"\nError during training iteration: {str(e)}")
-                return D_history, loss_history
+            # Record history
+            D_history.append(pinn.get_diffusion_coefficient())
+            loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
+            if epoch % 100 == 0:
+                print(f"\nPhase 1 - Epoch {epoch}, D = {D_history[-1]:.6f}")
+
+        # Phase 2: Fine-tuning with reduced regularization
+        print("\nPhase 2: Fine-tuning...")
+        phase2_epochs = epochs - phase1_epochs
+
+        for epoch in range(phase2_epochs):
+            if epoch % 50 == 0:
+                tf.keras.backend.clear_session()
+
+            print(f"\rPhase 2: {epoch+1}/{phase2_epochs}", end="", flush=True)
+
+            with tf.GradientTape() as tape:
+                # Same loss computation but with reduced regularization
+                losses = pinn.loss_fn(
+                    x_data=data['X_u_train'],
+                    c_data=data['u_train'],
+                    x_physics=data['X_f_train']
+                )
+
+                interior_loss = tf.reduce_mean(tf.square(
+                    pinn.forward_pass(data['X_i_train']) - data['u_i_train']
+                ))
+                losses['interior'] = interior_loss
+
+                # No L2 regularization in phase 2
+                total_loss = losses['total'] + pinn.loss_weights['interior'] * interior_loss
+                losses['total'] = total_loss
+
+            # Calculate and apply gradients
+            trainable_vars = pinn.get_trainable_variables()
+            gradients = tape.gradient(total_loss, trainable_vars)
+
+            # Reduced gradient clipping in phase 2
+            gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+            optimizer.apply_gradients(zip(gradients, trainable_vars))
+
+            # Enforce diffusion coefficient constraints
+            if pinn.config.diffusion_trainable:
+                D_value = pinn.D.numpy()
+                if D_value < D_min or D_value > D_max:
+                    constrained_D = np.clip(D_value, D_min, D_max)
+                    pinn.D.assign(constrained_D)
+
+            # Record history
+            D_history.append(pinn.get_diffusion_coefficient())
+            loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
+
+            if epoch % 100 == 0:
+                print(f"\nPhase 2 - Epoch {epoch}, D = {D_history[-1]:.6f}")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
-        return D_history, loss_history
-
+    except Exception as e:
+        print(f"\nError during training: {str(e)}")
 
     return D_history, loss_history
+
+
 
 def save_checkpoint(pinn: 'DiffusionPINN', save_dir: str, epoch: int) -> None:
     """
