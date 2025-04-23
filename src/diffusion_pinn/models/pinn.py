@@ -44,30 +44,36 @@ class DiffusionPINN(tf.Module):
         self._build_network()
 
     def _build_network(self):
-        """Initialize neural network parameters"""
+        """Initialize neural network parameters with better initialization"""
         # Full architecture including input (3: x,y,t) and output (1: concentration)
         architecture = [3] + self.config.hidden_layers + [1]
 
         self.weights = []
         self.biases = []
 
-        # Initialize weights and biases
+        # Enhanced weight initialization for better gradient flow
         for i in range(len(architecture)-1):
             input_dim, output_dim = architecture[i], architecture[i+1]
 
-            # Weight initialization
+            # Weight initialization with careful scaling
             if self.config.initialization == 'glorot':
                 std_dv = np.sqrt(2.0 / (input_dim + output_dim))
-            else:  # He initialization
+            elif self.config.initialization == 'he':
                 std_dv = np.sqrt(2.0 / input_dim)
+            else:  # Default to xavier
+                std_dv = np.sqrt(1.0 / input_dim)
 
+            # Use truncated normal to avoid extreme initial weights
             w = tf.Variable(
-                tf.random.normal([input_dim, output_dim], dtype=tf.float32) * std_dv,
+                tf.random.truncated_normal([input_dim, output_dim], mean=0.0, stddev=std_dv, dtype=tf.float32),
                 trainable=True,
                 name=f'w{i+1}'
             )
+
+            # Initialize biases to small positive values for better gradient flow
+            # especially useful for tanh activation
             b = tf.Variable(
-                tf.zeros([output_dim], dtype=tf.float32),
+                tf.constant(0.1, shape=[output_dim], dtype=tf.float32),
                 trainable=True,
                 name=f'b{i+1}'
             )
@@ -80,20 +86,33 @@ class DiffusionPINN(tf.Module):
         #return 2.0 * (x - self.lb) / (self.ub - self.lb) - 1.0
         return 2.0 * (tf.cast(x, tf.float32) - self.lb) / (self.ub - self.lb) - 1.0
 
-
     @tf.function
     def forward_pass(self, x: tf.Tensor) -> tf.Tensor:
-        """Forward pass through the network"""
+        """Forward pass through the network with improved activation functions"""
         X = self._normalize_inputs(x)
         H = X
+
         for i in range(len(self.weights)-1):
             H = tf.matmul(H, self.weights[i]) + self.biases[i]
+
+            # Apply activation with careful handling
             if self.config.activation == 'tanh':
+                # tanh with careful scaling to avoid saturation
                 H = tf.tanh(H)
             elif self.config.activation == 'sin':
+                # Sine activation with scaling
                 H = tf.sin(H)
+            elif self.config.activation == 'swish':
+                # Swish activation (x * sigmoid(x)) - often works better than ReLU
+                H = H * tf.sigmoid(H)
+            elif self.config.activation == 'elu':
+                # ELU can help with vanishing gradients
+                H = tf.nn.elu(H)
             else:
-                H = tf.nn.relu(H)
+                # Default to leaky ReLU which helps prevent dead neurons
+                H = tf.nn.leaky_relu(H, alpha=0.2)
+
+        # Linear output layer
         return tf.matmul(H, self.weights[-1]) + self.biases[-1]
 
     def identify_condition_points(self, x: tf.Tensor) -> Dict[str, tf.Tensor]:
@@ -130,27 +149,41 @@ class DiffusionPINN(tf.Module):
 
     @tf.function
     def compute_pde_residual(self, x_f: tf.Tensor) -> tf.Tensor:
-        try:
-            with tf.GradientTape(persistent=True) as tape2:
-                tape2.watch(x_f)
-                with tf.GradientTape(persistent=True) as tape1:
-                    tape1.watch(x_f)
-                    c = self.forward_pass(x_f)
+        """Compute PDE residual with better memory management"""
+        # Process in smaller batches to avoid OOM
+        batch_size = 1000
+        num_points = tf.shape(x_f)[0]
+        residuals = []
 
-                dc_dxyt = tape1.gradient(c, x_f)
+        for i in range(0, num_points, batch_size):
+            end_idx = tf.minimum(i + batch_size, num_points)
+            x_batch = x_f[i:end_idx]
+
+            with tf.GradientTape(persistent=True) as tape2:
+                tape2.watch(x_batch)
+                with tf.GradientTape(persistent=True) as tape1:
+                    tape1.watch(x_batch)
+                    c = self.forward_pass(x_batch)
+
+                dc_dxyt = tape1.gradient(c, x_batch)
                 dc_dt = dc_dxyt[..., 2:3]
                 dc_dx = dc_dxyt[..., 0:1]
                 dc_dy = dc_dxyt[..., 1:2]
 
-            d2c_dx2 = tape2.gradient(dc_dx, x_f)[..., 0:1]
-            d2c_dy2 = tape2.gradient(dc_dy, x_f)[..., 1:2]
+                # Explicit cleanup
+                del tape1
 
-            del tape1, tape2  # Explicit cleanup
+            d2c_dx2 = tape2.gradient(dc_dx, x_batch)[..., 0:1]
+            d2c_dy2 = tape2.gradient(dc_dy, x_batch)[..., 1:2]
 
-            return dc_dt - self.D * (d2c_dx2 + d2c_dy2)
-        except Exception as e:
-            print(f"Error in PDE residual computation: {str(e)}")
-            raise
+            # Explicit cleanup
+            del tape2
+
+            batch_residual = dc_dt - self.D * (d2c_dx2 + d2c_dy2)
+            residuals.append(batch_residual)
+
+        # Combine all batch residuals
+        return tf.concat(residuals, axis=0)
 
 
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,

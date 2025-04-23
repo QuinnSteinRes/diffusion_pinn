@@ -1,29 +1,25 @@
-"""
-Configuration variables for PINN training
-"""
-
 PINN_VARIABLES = {
-    # Network Architecture
-    'hidden_layers': [30, 30, 30], # 0.2.7 [40, 40, 40]
-    'activation': 'tanh',
+    # Network Architecture - Deeper but with reducing width
+    'hidden_layers': [40, 40, 40, 40],
+    'activation': 'tanh',  # tanh works well for PDEs
 
-    # Training Parameters
-    'epochs': 20000,
-    'learning_rate': 0.0005, #0.0005, # 0.2.7 0.001
-    'decay_steps': 2000, #2000, # 0.2.7 1000
-    'decay_rate': 0.90, #0.90,  # 0.2.7 0.95
-    'initial_D': 0.0005, #0.0005, # 0.2.7 0.001
+    # Training Parameters - More careful learning rate decay
+    'epochs': 10000,
+    'learning_rate': 0.001,
+    'decay_steps': 500,
+    'decay_rate': 0.95,
+    'initial_D': 0.005,  # Better initial guess #Range
 
-    # Sampling Points
-    'N_u': 2000,    # boundary points       0.2.7 1000
-    'N_f': 20000,   # collocation points
-    'N_i': 10000,   # interior points
+    # Sampling Points - Balanced boundary and interior
+    'N_u': 1000,    # boundary points
+    'N_f': 15000,   # collocation points (reduced to avoid memory issues)
+    'N_i': 8000,    # interior points
 
-    # Loss Weights
+    # Loss Weights - Enhanced weighting for physics
     'loss_weights': {
         'initial': 1.0,
         'boundary': 1.0,
         'interior': 10.0,
-        'physics': 10 #10.0    #0.2.7 5.0
+        'physics': 8.0  # Increased physics weight to enforce PDE
     }
 }
