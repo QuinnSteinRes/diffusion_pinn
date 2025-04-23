@@ -8,7 +8,7 @@ PINN_VARIABLES = {
     'learning_rate': 0.001,
     'decay_steps': 500,
     'decay_rate': 0.95,
-    'initial_D': 0.005,  # Better initial guess #Range
+    'initial_D': 0.00009,  # Better initial guess #Range
 
     # Sampling Points - Balanced boundary and interior
     'N_u': 1000,    # boundary points
