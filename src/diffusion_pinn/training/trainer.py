@@ -65,8 +65,8 @@ def train_pinn(pinn: 'DiffusionPINN',
     loss_history = []
 
     # Define acceptable range for diffusion coefficient
-    D_min = 0.000010
-    D_max = 0.1
+    D_min = 0
+    D_max = 0.5
 
     # Use two-phase training for better convergence
     try:
