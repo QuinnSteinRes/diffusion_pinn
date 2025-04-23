@@ -28,10 +28,12 @@ class DiffusionPINN(tf.Module):
         self.ub = tf.constant([self.x_bounds[1], self.y_bounds[1], self.t_bounds[1]],
                             dtype=tf.float32)
 
-        # Initialize diffusion coefficient
-        self.D = tf.Variable(initial_D, dtype=tf.float32,
+        # Initialize diffusion coefficient with positivity constraint
+        initial_D_value = max(initial_D, 1e-5)  # Ensure positive value
+        self.D = tf.Variable(initial_D_value, dtype=tf.float32,
                            trainable=self.config.diffusion_trainable,
-                           name='diffusion_coefficient')
+                           name='diffusion_coefficient',
+                           constraint=lambda x: tf.clip_by_value(x, 1e-5, 1.0))  # Add constraint
 
         # Store loss weights from variables
         self.loss_weights = PINN_VARIABLES['loss_weights']
@@ -44,36 +46,30 @@ class DiffusionPINN(tf.Module):
         self._build_network()
 
     def _build_network(self):
-        """Initialize neural network parameters with better initialization"""
+        """Initialize neural network parameters"""
         # Full architecture including input (3: x,y,t) and output (1: concentration)
         architecture = [3] + self.config.hidden_layers + [1]
 
         self.weights = []
         self.biases = []
 
-        # Enhanced weight initialization for better gradient flow
+        # Initialize weights and biases
         for i in range(len(architecture)-1):
             input_dim, output_dim = architecture[i], architecture[i+1]
 
-            # Weight initialization with careful scaling
+            # Weight initialization
             if self.config.initialization == 'glorot':
                 std_dv = np.sqrt(2.0 / (input_dim + output_dim))
-            elif self.config.initialization == 'he':
+            else:  # He initialization
                 std_dv = np.sqrt(2.0 / input_dim)
-            else:  # Default to xavier
-                std_dv = np.sqrt(1.0 / input_dim)
 
-            # Use truncated normal to avoid extreme initial weights
             w = tf.Variable(
-                tf.random.truncated_normal([input_dim, output_dim], mean=0.0, stddev=std_dv, dtype=tf.float32),
+                tf.random.normal([input_dim, output_dim], dtype=tf.float32) * std_dv,
                 trainable=True,
                 name=f'w{i+1}'
             )
-
-            # Initialize biases to small positive values for better gradient flow
-            # especially useful for tanh activation
             b = tf.Variable(
-                tf.constant(0.1, shape=[output_dim], dtype=tf.float32),
+                tf.zeros([output_dim], dtype=tf.float32),
                 trainable=True,
                 name=f'b{i+1}'
             )
@@ -86,34 +82,27 @@ class DiffusionPINN(tf.Module):
         #return 2.0 * (x - self.lb) / (self.ub - self.lb) - 1.0
         return 2.0 * (tf.cast(x, tf.float32) - self.lb) / (self.ub - self.lb) - 1.0
 
+
     @tf.function
     def forward_pass(self, x: tf.Tensor) -> tf.Tensor:
-        """Forward pass through the network with improved activation functions"""
+        """Forward pass through the network"""
         X = self._normalize_inputs(x)
         H = X
-
         for i in range(len(self.weights)-1):
             H = tf.matmul(H, self.weights[i]) + self.biases[i]
-
-            # Apply activation with careful handling
             if self.config.activation == 'tanh':
-                # tanh with careful scaling to avoid saturation
                 H = tf.tanh(H)
             elif self.config.activation == 'sin':
-                # Sine activation with scaling
                 H = tf.sin(H)
-            elif self.config.activation == 'swish':
-                # Swish activation (x * sigmoid(x)) - often works better than ReLU
-                H = H * tf.sigmoid(H)
-            elif self.config.activation == 'elu':
-                # ELU can help with vanishing gradients
-                H = tf.nn.elu(H)
             else:
-                # Default to leaky ReLU which helps prevent dead neurons
-                H = tf.nn.leaky_relu(H, alpha=0.2)
+                H = tf.nn.relu(H)
 
-        # Linear output layer
-        return tf.matmul(H, self.weights[-1]) + self.biases[-1]
+        # Apply softplus to ensure non-negative output (concentration is non-negative)
+        output = tf.matmul(H, self.weights[-1]) + self.biases[-1]
+
+        # Option for non-negative output (uncomment if needed)
+        # return tf.nn.softplus(output)
+        return output
 
     def identify_condition_points(self, x: tf.Tensor) -> Dict[str, tf.Tensor]:
         """Separate points into initial and boundary conditions"""
@@ -146,45 +135,65 @@ class DiffusionPINN(tf.Module):
             'boundary': x[bc_mask],
             'interior': x[interior_mask]
         }
-
     @tf.function
+    def compute_single_batch_residual(self, x_batch: tf.Tensor) -> tf.Tensor:
+        """Compute PDE residual for a single batch with improved numerical stability"""
+        with tf.GradientTape(persistent=True) as tape:
+            tape.watch(x_batch)
+            # Calculate function value
+            c = self.forward_pass(x_batch)
+
+            # First derivatives - get all at once
+            grad = tape.gradient(c, x_batch)
+
+            # Extract individual components with proper reshaping
+            dc_dx = tf.reshape(grad[:, 0], (-1, 1))
+            dc_dy = tf.reshape(grad[:, 1], (-1, 1))
+            dc_dt = tf.reshape(grad[:, 2], (-1, 1))
+
+        # Second derivatives
+        d2c_dx2 = tape.gradient(dc_dx, x_batch)[:, 0:1]
+        d2c_dy2 = tape.gradient(dc_dy, x_batch)[:, 1:2]
+
+        # Cleanup
+        del tape
+
+        # Ensure diffusion coefficient is positive during computation
+        D_value = tf.abs(self.D) + 1e-5
+
+        # Enhanced numerical stability
+        laplacian = d2c_dx2 + d2c_dy2
+        # Apply an outlier filter to the Laplacian for numerical stability
+        laplacian_mean = tf.reduce_mean(tf.abs(laplacian))
+        laplacian_filtered = tf.where(
+            tf.abs(laplacian) > 100.0 * laplacian_mean,
+            tf.sign(laplacian) * 100.0 * laplacian_mean,
+            laplacian
+        )
+
+        return dc_dt - D_value * laplacian_filtered
+
     def compute_pde_residual(self, x_f: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual with better memory management"""
-        # Process in smaller batches to avoid OOM
+        """Compute PDE residual with batching for memory efficiency"""
+        # For small inputs, just compute directly
+        if tf.shape(x_f)[0] <= 1000:
+            return self.compute_single_batch_residual(x_f)
+
+        # For larger inputs, process in batches
         batch_size = 1000
         num_points = tf.shape(x_f)[0]
+        num_batches = (num_points - 1) // batch_size + 1
+
         residuals = []
-
-        for i in range(0, num_points, batch_size):
-            end_idx = tf.minimum(i + batch_size, num_points)
-            x_batch = x_f[i:end_idx]
-
-            with tf.GradientTape(persistent=True) as tape2:
-                tape2.watch(x_batch)
-                with tf.GradientTape(persistent=True) as tape1:
-                    tape1.watch(x_batch)
-                    c = self.forward_pass(x_batch)
-
-                dc_dxyt = tape1.gradient(c, x_batch)
-                dc_dt = dc_dxyt[..., 2:3]
-                dc_dx = dc_dxyt[..., 0:1]
-                dc_dy = dc_dxyt[..., 1:2]
-
-                # Explicit cleanup
-                del tape1
-
-            d2c_dx2 = tape2.gradient(dc_dx, x_batch)[..., 0:1]
-            d2c_dy2 = tape2.gradient(dc_dy, x_batch)[..., 1:2]
-
-            # Explicit cleanup
-            del tape2
-
-            batch_residual = dc_dt - self.D * (d2c_dx2 + d2c_dy2)
+        for i in range(num_batches):
+            start_idx = i * batch_size
+            end_idx = tf.minimum(start_idx + batch_size, num_points)
+            x_batch = x_f[start_idx:end_idx]
+            batch_residual = self.compute_single_batch_residual(x_batch)
             residuals.append(batch_residual)
 
         # Combine all batch residuals
         return tf.concat(residuals, axis=0)
-
 
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,
                 x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
@@ -227,14 +236,27 @@ class DiffusionPINN(tf.Module):
                 losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
 
         # Physics loss
-        if self.config.use_physics_loss and x_physics is not None:
+        if self.config.use_physics_loss and x_physics is not None and x_physics.shape[0] > 0:
             pde_residual = self.compute_pde_residual(x_physics)
-            losses['physics'] = tf.reduce_mean(tf.square(pde_residual))
+
+            # Apply Huber loss for PDE residual to reduce sensitivity to outliers
+            delta = 1.0
+            abs_residual = tf.abs(pde_residual)
+            quadratic = tf.minimum(abs_residual, delta)
+            linear = abs_residual - quadratic
+            physics_loss = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
+
+            losses['physics'] = physics_loss
         else:
             losses['physics'] = tf.constant(0.0, dtype=tf.float32)
 
-        # Total loss
+        # Total loss with regularization for diffusion coefficient
         total_loss = sum(weights.get(key, 1.0) * losses[key] for key in losses.keys())
+
+        # Add regularization to keep D in reasonable range
+        d_reg = 0.01 * tf.square(tf.math.log(tf.abs(self.D) + 1e-6) - tf.math.log(0.01))
+        total_loss = total_loss + d_reg
+        losses['d_regularization'] = d_reg
         losses['total'] = total_loss
 
         return losses
