@@ -167,7 +167,7 @@ def preprocess_data(input_file):
             f.write('x,y,t,intensity\n')
 
         # Save data in batches to reduce memory usage
-        batch_size = 5000
+        batch_size = 20000
         total_rows = len(data)
 
         for start_idx in range(0, total_rows, batch_size):

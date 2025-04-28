@@ -7,9 +7,9 @@ set -e
 WORKDIR=$PWD
 
 # Array of case numbers
-#cases=(2 3 4 5 6 7 8 9 10)
+cases=(1 2 3 4 5 6 7 8 9 10)
 
-cases=(1)
+#cases=(1 2 3 4 5)
 
 # Check if we're in the correct directory
 #if [ ! -d "run_1" ]; then
@@ -38,7 +38,7 @@ do
     # Copy and prepare runCase script
     #cp ../../defaultScripts/runCaseNew.sh ./runCase.sh
     #cp ../defaultScripts/runCaseNew.sh ./runCase.sh
-    sed -i "s/CHARCASE/casev2_${casei}/g" runCase.sh
+    sed -i "s/CHARCASE/case14_${casei}/g" runCase.sh
     #chmod +x runCase.sh
     
     # Submit job
