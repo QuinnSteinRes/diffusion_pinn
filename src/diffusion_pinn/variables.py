@@ -1,25 +1,25 @@
 PINN_VARIABLES = {
-    # Network Architecture - More stable architecture
-    'hidden_layers': [20, 40, 40, 20],  # Wider in middle, narrow at ends
-    'activation': 'tanh',  # Keep tanh which works well for PDEs
+    # Network Architecture - Balanced for diffusion problems
+    'hidden_layers': [20, 40, 40, 20],  # Keep the proven architecture
+    'activation': 'tanh',  # Maintain tanh activation
 
-    # Training Parameters - More conservative learning
-    'epochs': 12000,      # More epochs for proper convergence
-    'learning_rate': 0.0008,  # Slightly lower initial learning rate
-    'decay_steps': 1200,  # Slower decay
-    'decay_rate': 0.95,   # More gentle decay
-    'initial_D': 0.0001,  # Start from a reasonable middle value
+    # Training Parameters - Optimized for convergence
+    'epochs': 15000,      # Keep your increased epochs
+    'learning_rate': 0.001,  # Slightly higher learning rate for faster initial convergence
+    'decay_steps': 1200,  # Keep moderate decay steps
+    'decay_rate': 0.96,   # Balanced decay rate between current and your proposal
+    'initial_D': 0.00009,  # Start slightly below expected value to prevent overshooting
 
-    # Sampling Points - Keep as is
-    'N_u': 1000,    # boundary points
-    'N_f': 15000,   # collocation points
-    'N_i': 8000,    # interior points
+    # Sampling Points - Balanced distribution
+    'N_u': 1000,    # Keep boundary points consistent
+    'N_f': 18000,   # Moderate increase in collocation points
+    'N_i': 9000,    # Moderate increase in interior points
 
-    # Loss Weights - Emphasize physics more
+    # Loss Weights - Balanced weights with phase-based approach
     'loss_weights': {
         'initial': 1.0,
         'boundary': 1.0,
-        'interior': 8.0,
-        'physics': 12.0  # Higher physics weight
+        'interior': 6.0,   # Moderate weight on interior points
+        'physics': 10.0    # Strong but not overwhelming physics weight
     }
 }
