@@ -66,10 +66,23 @@ def train_pinn(pinn: 'DiffusionPINN',
     D_min = 5e-7  # Lower minimum to allow more exploration
     D_max = 2e-3  # Slightly higher maximum
 
-    # Create learning rate schedule with warm-up and decay
-    initial_learning_rate = optimizer.learning_rate.initial_learning_rate if hasattr(optimizer.learning_rate, 'initial_learning_rate') else 0.001
+    # Check if optimizer has a fixed or dynamic learning rate
+    has_lr_schedule = not isinstance(getattr(optimizer, 'learning_rate', 0), float)
 
-    def lr_schedule(epoch):
+    # Define learning rate schedule function (only used if optimizer allows it)
+    def get_lr_for_epoch(epoch):
+        initial_learning_rate = 0.001  # Default if we can't determine actual value
+        try:
+            # Try to get the initial learning rate
+            if hasattr(optimizer.learning_rate, 'initial_learning_rate'):
+                initial_learning_rate = optimizer.learning_rate.initial_learning_rate
+            elif hasattr(optimizer, '_hyper') and 'learning_rate' in optimizer._hyper:
+                initial_learning_rate = optimizer._hyper['learning_rate']
+            elif hasattr(optimizer, 'lr'):
+                initial_learning_rate = optimizer.lr
+        except:
+            pass
+
         warmup_epochs = min(200, epochs // 20)
         if epoch < warmup_epochs:
             # Linear warm-up
@@ -99,11 +112,8 @@ def train_pinn(pinn: 'DiffusionPINN',
             if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            # Apply learning rate schedule
-            if hasattr(optimizer, 'learning_rate'):
-                optimizer.learning_rate = lr_schedule(epoch)
-
-            print(f"\rPhase 1: {epoch+1}/{phase1_epochs}, LR: {optimizer.learning_rate.numpy():.2e}", end="", flush=True)
+            current_lr = get_lr_for_epoch(epoch)
+            print(f"\rPhase 1: {epoch+1}/{phase1_epochs}, LR: {current_lr:.2e}", end="", flush=True)
 
             with tf.GradientTape() as tape:
                 # Compute losses with phase 1 weights
@@ -122,7 +132,7 @@ def train_pinn(pinn: 'DiffusionPINN',
                 # Add L2 regularization for weights
                 l2_loss = 0.0005 * sum(tf.reduce_sum(tf.square(w)) for w in pinn.weights)
 
-                # Add regiteration to encourage reasonable Diffusion values early
+                # Add regularization to encourage reasonable Diffusion values early
                 d_reg = 0.1 * tf.square(tf.math.log(pinn.D + 1e-6) - tf.math.log(tf.constant(0.0001, dtype=tf.float32)))
 
                 # Total loss
@@ -171,11 +181,8 @@ def train_pinn(pinn: 'DiffusionPINN',
             if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            # Apply learning rate schedule
-            if hasattr(optimizer, 'learning_rate'):
-                optimizer.learning_rate = lr_schedule(phase1_epochs + epoch)
-
-            print(f"\rPhase 2: {epoch+1}/{phase2_epochs}, LR: {optimizer.learning_rate.numpy():.2e}", end="", flush=True)
+            current_lr = get_lr_for_epoch(phase1_epochs + epoch)
+            print(f"\rPhase 2: {epoch+1}/{phase2_epochs}, LR: {current_lr:.2e}", end="", flush=True)
 
             with tf.GradientTape() as tape:
                 # Compute losses with phase 2 weights
@@ -245,18 +252,19 @@ def train_pinn(pinn: 'DiffusionPINN',
 
         print(f"Phase 3 adaptive weights: {phase3_weights}")
 
-        # Exponential moving average of parameters for stability
-        ema = tf.train.ExponentialMovingAverage(decay=0.99)
+        # Setup EMA without using the actual TF implementation (for compatibility)
+        ema_weights = [tf.Variable(w.numpy()) for w in pinn.weights]
+        ema_biases = [tf.Variable(b.numpy()) for b in pinn.biases]
+        if pinn.config.diffusion_trainable:
+            ema_D = tf.Variable(pinn.D.numpy())
+        ema_decay = 0.99
 
         for epoch in range(phase3_epochs):
             if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            # Apply learning rate schedule
-            if hasattr(optimizer, 'learning_rate'):
-                optimizer.learning_rate = lr_schedule(phase1_epochs + phase2_epochs + epoch)
-
-            print(f"\rPhase 3: {epoch+1}/{phase3_epochs}, LR: {optimizer.learning_rate.numpy():.2e}", end="", flush=True)
+            current_lr = get_lr_for_epoch(phase1_epochs + phase2_epochs + epoch)
+            print(f"\rPhase 3: {epoch+1}/{phase3_epochs}, LR: {current_lr:.2e}", end="", flush=True)
 
             with tf.GradientTape() as tape:
                 # Compute losses with adaptive weights
@@ -291,17 +299,28 @@ def train_pinn(pinn: 'DiffusionPINN',
             gradients, _ = tf.clip_by_global_norm(gradients, 2.0)  # Least aggressive clipping in phase 3
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-            # Apply exponential moving average to parameters
-            ema.apply(trainable_vars)
+            # Update EMA values manually
+            for i, w in enumerate(pinn.weights):
+                ema_weights[i].assign(ema_decay * ema_weights[i] + (1 - ema_decay) * w)
+            for i, b in enumerate(pinn.biases):
+                ema_biases[i].assign(ema_decay * ema_biases[i] + (1 - ema_decay) * b)
+            if pinn.config.diffusion_trainable:
+                ema_D.assign(ema_decay * ema_D + (1 - ema_decay) * pinn.D)
 
-            # Every 100 epochs, update with EMA values temporarily for evaluation
+            # Every 100 epochs, evaluate with EMA values temporarily
             if epoch % 100 == 0 or epoch == phase3_epochs - 1:
                 # Store original values
-                original_vars = [var.numpy() for var in trainable_vars]
+                original_weights = [w.numpy() for w in pinn.weights]
+                original_biases = [b.numpy() for b in pinn.biases]
+                original_D = pinn.D.numpy() if pinn.config.diffusion_trainable else None
 
                 # Apply EMA values
-                for i, var in enumerate(trainable_vars):
-                    var.assign(ema.average(var).numpy())
+                for i, w in enumerate(pinn.weights):
+                    w.assign(ema_weights[i])
+                for i, b in enumerate(pinn.biases):
+                    b.assign(ema_biases[i])
+                if pinn.config.diffusion_trainable:
+                    pinn.D.assign(ema_D)
 
                 # Record history with EMA values
                 D_history.append(pinn.get_diffusion_coefficient())
@@ -315,16 +334,24 @@ def train_pinn(pinn: 'DiffusionPINN',
                 print(f"\nPhase 3 - Epoch {epoch}, D = {D_history[-1]:.6f}, Loss = {loss_current['total']:.6f}")
 
                 # Restore original values
-                for i, var in enumerate(trainable_vars):
-                    var.assign(original_vars[i])
+                for i, w in enumerate(pinn.weights):
+                    w.assign(original_weights[i])
+                for i, b in enumerate(pinn.biases):
+                    b.assign(original_biases[i])
+                if pinn.config.diffusion_trainable:
+                    pinn.D.assign(original_D)
             else:
                 # Record history with current values
                 D_history.append(pinn.get_diffusion_coefficient())
                 loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
         # Apply EMA values at the end for final model
-        for var in trainable_vars:
-            var.assign(ema.average(var).numpy())
+        for i, w in enumerate(pinn.weights):
+            w.assign(ema_weights[i])
+        for i, b in enumerate(pinn.biases):
+            b.assign(ema_biases[i])
+        if pinn.config.diffusion_trainable:
+            pinn.D.assign(ema_D)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
