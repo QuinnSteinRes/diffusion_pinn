@@ -58,7 +58,21 @@ def train_pinn(pinn: 'DiffusionPINN',
               epochs: int = 100,
               save_dir: str = None,
               checkpoint_frequency: int = 1000) -> Tuple[List[float], List[Dict[str, float]]]:
-    """Training function with adaptive learning, constraints, and multi-stage approach"""
+    """
+    Training function with improved stability and EMA implementation
+
+    Args:
+        pinn: The PINN model to train
+        data: Dictionary of training data tensors
+        optimizer: TensorFlow optimizer
+        epochs: Number of training epochs
+        save_dir: Directory to save checkpoints
+        checkpoint_frequency: How often to save checkpoints
+
+    Returns:
+        Tuple of (diffusion coefficient history, loss history)
+    """
+    # Main history tracking
     D_history = []
     loss_history = []
 
@@ -66,55 +80,43 @@ def train_pinn(pinn: 'DiffusionPINN',
     D_min = 5e-7  # Lower minimum to allow more exploration
     D_max = 2e-3  # Slightly higher maximum
 
-    # Check if optimizer has a fixed or dynamic learning rate
-    has_lr_schedule = not isinstance(getattr(optimizer, 'learning_rate', 0), float)
-
-    # Define learning rate schedule function (only used if optimizer allows it)
-    def get_lr_for_epoch(epoch):
-        initial_learning_rate = 0.001  # Default if we can't determine actual value
-        try:
-            # Try to get the initial learning rate
-            if hasattr(optimizer.learning_rate, 'initial_learning_rate'):
-                initial_learning_rate = optimizer.learning_rate.initial_learning_rate
-            elif hasattr(optimizer, '_hyper') and 'learning_rate' in optimizer._hyper:
-                initial_learning_rate = optimizer._hyper['learning_rate']
-            elif hasattr(optimizer, 'lr'):
-                initial_learning_rate = optimizer.lr
-        except:
-            pass
-
-        warmup_epochs = min(200, epochs // 20)
-        if epoch < warmup_epochs:
-            # Linear warm-up
-            return initial_learning_rate * (epoch + 1) / warmup_epochs
-        else:
-            # Cosine decay with restarts
-            decay_epochs = epochs - warmup_epochs
-            epoch_in_cycle = (epoch - warmup_epochs) % (decay_epochs // 3)
-            cycle_progress = epoch_in_cycle / (decay_epochs // 3)
-            return 0.1 * initial_learning_rate + 0.9 * initial_learning_rate * 0.5 * (1 + np.cos(np.pi * cycle_progress))
+    # Create EMA model - a completely separate model instance
+    ema_pinn = create_ema_model(pinn)
+    ema_decay = 0.995  # Higher value for more stability (closer to 1.0)
+    ema_active = False  # Flag to track if we're using EMA values for evaluation
 
     # Multi-stage training approach
+    total_epochs = epochs
+    phase1_epochs = min(epochs // 5, 1000)
+    phase2_epochs = min(epochs // 3, 2000)
+    phase3_epochs = epochs - phase1_epochs - phase2_epochs
+
+    # Phase 1: PDE physics emphasis
+    print(f"Phase 1: Physics-based initialization ({phase1_epochs} epochs)...")
+
+    # Initial loss weights
+    phase1_weights = {
+        'initial': 2.0,      # Emphasize initial conditions
+        'boundary': 2.0,     # Emphasize boundary conditions
+        'interior': 1.0,     # Less weight on interior data points initially
+        'physics': 10.0      # High weight on physics (PDE)
+    }
+
     try:
-        # Phase 1: PDE physics emphasis
-        print("Phase 1: Physics-based initialization...")
-        phase1_epochs = min(epochs // 5, 1000)
-
-        # Custom loss weights for phase 1
-        phase1_weights = {
-            'initial': 2.0,      # Emphasize initial conditions
-            'boundary': 2.0,     # Emphasize boundary conditions
-            'interior': 1.0,     # Less weight on interior data points initially
-            'physics': 10.0      # Very high weight on physics (PDE)
-        }
-
+        # Phase 1 training loop
         for epoch in range(phase1_epochs):
+            # Periodic memory cleanup
             if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            current_lr = get_lr_for_epoch(epoch)
-            print(f"\rPhase 1: {epoch+1}/{phase1_epochs}, LR: {current_lr:.2e}", end="", flush=True)
+            # Calculate smooth learning rate
+            current_lr = get_smooth_lr(epoch, phase1_epochs, initial_lr=1e-3, min_lr=1e-5)
 
+            # Apply learning rate if optimizer supports it
+            if hasattr(optimizer, 'learning_rate'):
+                optimizer.learning_rate.assign(current_lr)
+
+            # Training step with gradient tape
             with tf.GradientTape() as tape:
                 # Compute losses with phase 1 weights
                 losses = pinn.loss_fn(
@@ -124,15 +126,16 @@ def train_pinn(pinn: 'DiffusionPINN',
                     weights=phase1_weights
                 )
 
-                interior_loss = tf.reduce_mean(tf.square(
-                    pinn.forward_pass(data['X_i_train']) - data['u_i_train']
-                ))
+                # Compute interior loss separately for better stability
+                interior_loss = compute_stable_interior_loss(
+                    pinn, data['X_i_train'], data['u_i_train']
+                )
                 losses['interior'] = interior_loss
 
                 # Add L2 regularization for weights
                 l2_loss = 0.0005 * sum(tf.reduce_sum(tf.square(w)) for w in pinn.weights)
 
-                # Add regularization to encourage reasonable Diffusion values early
+                # Add regularization to encourage reasonable diffusion values
                 d_reg = 0.1 * tf.square(tf.math.log(pinn.D + 1e-6) - tf.math.log(tf.constant(0.0001, dtype=tf.float32)))
 
                 # Total loss
@@ -143,12 +146,18 @@ def train_pinn(pinn: 'DiffusionPINN',
                 )
                 losses['total'] = total_loss
 
-            # Calculate and apply gradients
+            # Calculate and apply gradients with stability measures
             trainable_vars = pinn.get_trainable_variables()
             gradients = tape.gradient(total_loss, trainable_vars)
 
-            # Apply gradient clipping
-            gradients, _ = tf.clip_by_global_norm(gradients, 0.5)  # More aggressive clipping in phase 1
+            # Apply consistent gradient clipping
+            gradients, global_norm = tf.clip_by_global_norm(gradients, 1.0)
+
+            # Log warning for large gradients
+            if global_norm > 10.0:
+                print(f"Warning: Large gradient norm: {global_norm:.2f}")
+
+            # Apply gradients
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
             # Enforce diffusion coefficient constraints
@@ -158,54 +167,88 @@ def train_pinn(pinn: 'DiffusionPINN',
                     constrained_D = np.clip(D_value, D_min, D_max)
                     pinn.D.assign(constrained_D)
 
-            # Record history
+            # Update EMA model - without affecting main training
+            update_ema_model(ema_pinn, pinn, ema_decay)
+
+            # Record primary model history only
             D_history.append(pinn.get_diffusion_coefficient())
             loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
+            # Logging and checkpoints
             if epoch % 100 == 0:
-                print(f"\nPhase 1 - Epoch {epoch}, D = {D_history[-1]:.6f}, Loss = {losses['total']:.6f}")
+                print(f"\nPhase 1 - Epoch {epoch}, D = {D_history[-1]:.6f}, Loss = {losses['total']:.6f}, LR = {current_lr:.6f}")
+
+                # Evaluate EMA model separately (for monitoring only)
+                ema_losses = ema_pinn.loss_fn(
+                    x_data=data['X_u_train'],
+                    c_data=data['u_train'],
+                    x_physics=data['X_f_train'],
+                    weights=phase1_weights
+                )
+                ema_D = ema_pinn.get_diffusion_coefficient()
+                print(f"EMA model - D = {ema_D:.6f}, Loss = {float(ema_losses['total']):.6f}")
+
+                # Save checkpoint if requested
+                if save_dir and epoch % checkpoint_frequency == 0:
+                    save_checkpoint(pinn, save_dir, f"phase1_{epoch}")
 
         # Phase 2: Data-fitting and refinement
-        print("\nPhase 2: Data-fitting and refinement...")
-        phase2_epochs = min(epochs // 3, 2000)
+        print(f"\nPhase 2: Data-fitting and refinement ({phase2_epochs} epochs)...")
 
-        # Custom loss weights for phase 2
+        # Transition weights gradually
         phase2_weights = {
             'initial': 1.0,      # Balanced initial conditions
             'boundary': 1.0,     # Balanced boundary conditions
-            'interior': 5.0,     # Higher weight on interior data points
-            'physics': 5.0       # Slightly reduced physics weight
+            'interior': 3.0,     # Gradually increased interior weight
+            'physics': 6.0       # Slightly reduced physics weight
         }
 
         for epoch in range(phase2_epochs):
+            # Periodic memory cleanup
             if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            current_lr = get_lr_for_epoch(phase1_epochs + epoch)
-            print(f"\rPhase 2: {epoch+1}/{phase2_epochs}, LR: {current_lr:.2e}", end="", flush=True)
+            # Calculate smooth learning rate - slightly lower than phase 1
+            current_lr = get_smooth_lr(epoch, phase2_epochs, initial_lr=5e-4, min_lr=1e-5)
+
+            # Apply learning rate if optimizer supports it
+            if hasattr(optimizer, 'learning_rate'):
+                optimizer.learning_rate.assign(current_lr)
+
+            # Phase transition factor for smooth weight transition
+            transition_factor = min(1.0, epoch / (phase2_epochs * 0.7))
+
+            # Smooth weight transition between phases
+            current_weights = {}
+            for key in phase1_weights:
+                current_weights[key] = phase1_weights[key] + (phase2_weights[key] - phase1_weights[key]) * transition_factor
 
             with tf.GradientTape() as tape:
-                # Compute losses with phase 2 weights
+                # Compute losses with transitioning weights
                 losses = pinn.loss_fn(
                     x_data=data['X_u_train'],
                     c_data=data['u_train'],
                     x_physics=data['X_f_train'],
-                    weights=phase2_weights
+                    weights=current_weights
                 )
 
-                interior_loss = tf.reduce_mean(tf.square(
-                    pinn.forward_pass(data['X_i_train']) - data['u_i_train']
-                ))
+                # Compute interior loss with stability measures
+                interior_loss = compute_stable_interior_loss(
+                    pinn, data['X_i_train'], data['u_i_train']
+                )
                 losses['interior'] = interior_loss
 
                 # Reduced L2 regularization
                 l2_loss = 0.0001 * sum(tf.reduce_sum(tf.square(w)) for w in pinn.weights)
 
+                # Reduced D regularization
+                d_reg = 0.05 * tf.square(tf.math.log(pinn.D + 1e-6) - tf.math.log(tf.constant(0.0001, dtype=tf.float32)))
+
                 # Total loss
                 total_loss = (
                     losses['total'] +
-                    phase2_weights['interior'] * interior_loss +
-                    l2_loss
+                    current_weights['interior'] * interior_loss +
+                    l2_loss + d_reg
                 )
                 losses['total'] = total_loss
 
@@ -213,8 +256,8 @@ def train_pinn(pinn: 'DiffusionPINN',
             trainable_vars = pinn.get_trainable_variables()
             gradients = tape.gradient(total_loss, trainable_vars)
 
-            # Apply gradient clipping
-            gradients, _ = tf.clip_by_global_norm(gradients, 1.0)  # Less aggressive clipping in phase 2
+            # Apply consistent gradient clipping
+            gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
             # Enforce diffusion coefficient constraints
@@ -224,50 +267,56 @@ def train_pinn(pinn: 'DiffusionPINN',
                     constrained_D = np.clip(D_value, D_min, D_max)
                     pinn.D.assign(constrained_D)
 
+            # Update EMA model
+            update_ema_model(ema_pinn, pinn, ema_decay)
+
             # Record history
             D_history.append(pinn.get_diffusion_coefficient())
             loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
+            # Logging and checkpoints
             if epoch % 100 == 0:
-                print(f"\nPhase 2 - Epoch {epoch}, D = {D_history[-1]:.6f}, Loss = {losses['total']:.6f}")
+                print(f"\nPhase 2 - Epoch {epoch}, D = {D_history[-1]:.6f}, Loss = {losses['total']:.6f}, LR = {current_lr:.6f}")
+
+                # Evaluate EMA model separately
+                ema_losses = ema_pinn.loss_fn(
+                    x_data=data['X_u_train'],
+                    c_data=data['u_train'],
+                    x_physics=data['X_f_train'],
+                    weights=current_weights
+                )
+                ema_D = ema_pinn.get_diffusion_coefficient()
+                print(f"EMA model - D = {ema_D:.6f}, Loss = {float(ema_losses['total']):.6f}")
+
+                # Save checkpoint if requested
+                if save_dir and epoch % checkpoint_frequency == 0:
+                    save_checkpoint(pinn, save_dir, f"phase2_{epoch}")
 
         # Phase 3: Fine-tuning
-        print("\nPhase 3: Fine-tuning...")
-        phase3_epochs = epochs - phase1_epochs - phase2_epochs
+        print(f"\nPhase 3: Fine-tuning ({phase3_epochs} epochs)...")
 
-        # Adaptive loss weighting based on previous loss values
-        avg_losses = {k: 0.0 for k in ['initial', 'boundary', 'interior', 'physics']}
-        for loss_dict in loss_history[-100:]:
-            for k in avg_losses.keys():
-                if k in loss_dict:
-                    avg_losses[k] += loss_dict[k] / 100
-
-        # Set weights inversely proportional to loss magnitude
-        max_loss = max(avg_losses.values())
-        phase3_weights = {k: max(1.0, max_loss / (v + 1e-8)) for k, v in avg_losses.items()}
-
-        # Normalize weights to reasonable range
-        weight_sum = sum(phase3_weights.values())
-        phase3_weights = {k: 10.0 * v / weight_sum for k, v in phase3_weights.items()}
-
-        print(f"Phase 3 adaptive weights: {phase3_weights}")
-
-        # Setup EMA without using the actual TF implementation (for compatibility)
-        ema_weights = [tf.Variable(w.numpy()) for w in pinn.weights]
-        ema_biases = [tf.Variable(b.numpy()) for b in pinn.biases]
-        if pinn.config.diffusion_trainable:
-            ema_D = tf.Variable(pinn.D.numpy())
-        ema_decay = 0.99
+        # Final phase weights with emphasis on data fitting
+        phase3_weights = {
+            'initial': 1.0,      # Balanced initial conditions
+            'boundary': 1.0,     # Balanced boundary conditions
+            'interior': 5.0,     # Higher weight on interior data points
+            'physics': 3.0       # Reduced physics weight to prioritize data
+        }
 
         for epoch in range(phase3_epochs):
+            # Periodic memory cleanup
             if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            current_lr = get_lr_for_epoch(phase1_epochs + phase2_epochs + epoch)
-            print(f"\rPhase 3: {epoch+1}/{phase3_epochs}, LR: {current_lr:.2e}", end="", flush=True)
+            # Calculate smooth learning rate - low and stable for fine-tuning
+            current_lr = get_smooth_lr(epoch, phase3_epochs, initial_lr=1e-4, min_lr=5e-6)
+
+            # Apply learning rate if optimizer supports it
+            if hasattr(optimizer, 'learning_rate'):
+                optimizer.learning_rate.assign(current_lr)
 
             with tf.GradientTape() as tape:
-                # Compute losses with adaptive weights
+                # Compute losses with phase 3 weights
                 losses = pinn.loss_fn(
                     x_data=data['X_u_train'],
                     c_data=data['u_train'],
@@ -275,9 +324,10 @@ def train_pinn(pinn: 'DiffusionPINN',
                     weights=phase3_weights
                 )
 
-                interior_loss = tf.reduce_mean(tf.square(
-                    pinn.forward_pass(data['X_i_train']) - data['u_i_train']
-                ))
+                # Compute interior loss with stability measures
+                interior_loss = compute_stable_interior_loss(
+                    pinn, data['X_i_train'], data['u_i_train']
+                )
                 losses['interior'] = interior_loss
 
                 # Minimal regularization in final phase
@@ -295,63 +345,80 @@ def train_pinn(pinn: 'DiffusionPINN',
             trainable_vars = pinn.get_trainable_variables()
             gradients = tape.gradient(total_loss, trainable_vars)
 
-            # Apply gradient clipping
-            gradients, _ = tf.clip_by_global_norm(gradients, 2.0)  # Least aggressive clipping in phase 3
+            # Apply consistent gradient clipping
+            gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-            # Update EMA values manually
-            for i, w in enumerate(pinn.weights):
-                ema_weights[i].assign(ema_decay * ema_weights[i] + (1 - ema_decay) * w)
-            for i, b in enumerate(pinn.biases):
-                ema_biases[i].assign(ema_decay * ema_biases[i] + (1 - ema_decay) * b)
+            # Enforce diffusion coefficient constraints
             if pinn.config.diffusion_trainable:
-                ema_D.assign(ema_decay * ema_D + (1 - ema_decay) * pinn.D)
+                D_value = pinn.D.numpy()
+                if D_value < D_min or D_value > D_max:
+                    constrained_D = np.clip(D_value, D_min, D_max)
+                    pinn.D.assign(constrained_D)
 
-            # Every 100 epochs, evaluate with EMA values temporarily
-            if epoch % 100 == 0 or epoch == phase3_epochs - 1:
-                # Store original values
-                original_weights = [w.numpy() for w in pinn.weights]
-                original_biases = [b.numpy() for b in pinn.biases]
-                original_D = pinn.D.numpy() if pinn.config.diffusion_trainable else None
+            # Update EMA model
+            update_ema_model(ema_pinn, pinn, ema_decay)
 
-                # Apply EMA values
-                for i, w in enumerate(pinn.weights):
-                    w.assign(ema_weights[i])
-                for i, b in enumerate(pinn.biases):
-                    b.assign(ema_biases[i])
-                if pinn.config.diffusion_trainable:
-                    pinn.D.assign(ema_D)
+            # Record history
+            D_history.append(pinn.get_diffusion_coefficient())
+            loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
-                # Record history with EMA values
-                D_history.append(pinn.get_diffusion_coefficient())
-                loss_current = pinn.loss_fn(
+            # Logging and checkpoints
+            if epoch % 100 == 0:
+                print(f"\nPhase 3 - Epoch {epoch}, D = {D_history[-1]:.6f}, Loss = {losses['total']:.6f}, LR = {current_lr:.6f}")
+
+                # Evaluate EMA model separately
+                ema_losses = ema_pinn.loss_fn(
                     x_data=data['X_u_train'],
                     c_data=data['u_train'],
-                    x_physics=data['X_f_train']
+                    x_physics=data['X_f_train'],
+                    weights=phase3_weights
                 )
-                loss_history.append({k: float(v.numpy()) for k, v in loss_current.items()})
+                ema_D = ema_pinn.get_diffusion_coefficient()
+                print(f"EMA model - D = {ema_D:.6f}, Loss = {float(ema_losses['total']):.6f}")
 
-                print(f"\nPhase 3 - Epoch {epoch}, D = {D_history[-1]:.6f}, Loss = {loss_current['total']:.6f}")
+                # Save checkpoint if requested
+                if save_dir and epoch % checkpoint_frequency == 0:
+                    save_checkpoint(pinn, save_dir, f"phase3_{epoch}")
 
-                # Restore original values
-                for i, w in enumerate(pinn.weights):
-                    w.assign(original_weights[i])
-                for i, b in enumerate(pinn.biases):
-                    b.assign(original_biases[i])
-                if pinn.config.diffusion_trainable:
-                    pinn.D.assign(original_D)
-            else:
-                # Record history with current values
-                D_history.append(pinn.get_diffusion_coefficient())
-                loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
+        # Final evaluation
+        print("\nTraining complete. Evaluating final models...")
 
-        # Apply EMA values at the end for final model
-        for i, w in enumerate(pinn.weights):
-            w.assign(ema_weights[i])
-        for i, b in enumerate(pinn.biases):
-            b.assign(ema_biases[i])
-        if pinn.config.diffusion_trainable:
-            pinn.D.assign(ema_D)
+        # Evaluate primary model
+        final_losses = pinn.loss_fn(
+            x_data=data['X_u_train'],
+            c_data=data['u_train'],
+            x_physics=data['X_f_train'],
+            weights=phase3_weights
+        )
+        final_D = pinn.get_diffusion_coefficient()
+        print(f"Final model - D = {final_D:.6f}, Loss = {float(final_losses['total']):.6f}")
+
+        # Evaluate EMA model
+        ema_final_losses = ema_pinn.loss_fn(
+            x_data=data['X_u_train'],
+            c_data=data['u_train'],
+            x_physics=data['X_f_train'],
+            weights=phase3_weights
+        )
+        ema_final_D = ema_pinn.get_diffusion_coefficient()
+        print(f"EMA model - D = {ema_final_D:.6f}, Loss = {float(ema_final_losses['total']):.6f}")
+
+        # Replace with EMA model if it performs better
+        if float(ema_final_losses['total']) < float(final_losses['total']):
+            print("EMA model performed better. Replacing primary model with EMA model.")
+            copy_model_parameters(pinn, ema_pinn)
+
+            # Add final EMA model value to history
+            D_history.append(ema_final_D)
+            loss_history.append({k: float(v.numpy()) for k, v in ema_final_losses.items()})
+
+        # Save final model if directory provided
+        if save_dir:
+            save_checkpoint(pinn, save_dir, "final")
+
+            # Also save a separate checkpoint for the EMA model
+            save_checkpoint(ema_pinn, save_dir, "final_ema")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
@@ -361,6 +428,87 @@ def train_pinn(pinn: 'DiffusionPINN',
         traceback.print_exc()
 
     return D_history, loss_history
+
+# Helper functions for the train_pinn function
+
+def create_ema_model(source_model):
+    """Create a copy of the model for EMA tracking"""
+    # Get model configuration
+    config = source_model.config
+
+    # Create new model with same configuration
+    ema_model = DiffusionPINN(
+        spatial_bounds={
+            'x': source_model.x_bounds,
+            'y': source_model.y_bounds
+        },
+        time_bounds=source_model.t_bounds,
+        initial_D=source_model.D.numpy(),
+        config=config
+    )
+
+    # Copy initial weights
+    for i, w in enumerate(source_model.weights):
+        ema_model.weights[i].assign(w.numpy())
+    for i, b in enumerate(source_model.biases):
+        ema_model.biases[i].assign(b.numpy())
+
+    return ema_model
+
+def update_ema_model(ema_model, source_model, decay):
+    """Update EMA model weights based on source model"""
+    for i, w in enumerate(source_model.weights):
+        ema_model.weights[i].assign(decay * ema_model.weights[i] + (1 - decay) * w)
+    for i, b in enumerate(source_model.biases):
+        ema_model.biases[i].assign(decay * ema_model.biases[i] + (1 - decay) * b)
+
+    # Update diffusion coefficient if trainable
+    if source_model.config.diffusion_trainable:
+        ema_model.D.assign(decay * ema_model.D + (1 - decay) * source_model.D)
+
+def copy_model_parameters(target_model, source_model):
+    """Copy parameters from source model to target model"""
+    for i, w in enumerate(source_model.weights):
+        target_model.weights[i].assign(w.numpy())
+    for i, b in enumerate(source_model.biases):
+        target_model.biases[i].assign(b.numpy())
+
+    if source_model.config.diffusion_trainable:
+        target_model.D.assign(source_model.D.numpy())
+
+def get_smooth_lr(epoch, total_epochs, initial_lr=1e-3, min_lr=1e-5):
+    """Smooth learning rate schedule without restarts"""
+    # Warmup phase
+    warmup_epochs = min(200, total_epochs // 10)
+
+    if epoch < warmup_epochs:
+        # Linear warm-up
+        return initial_lr * (epoch + 1) / warmup_epochs
+    else:
+        # Smooth exponential decay
+        decay_epochs = total_epochs - warmup_epochs
+        decay_position = (epoch - warmup_epochs) / max(1, decay_epochs)
+
+        # Exponential decay with floor
+        decay_factor = tf.exp(-4.0 * decay_position)
+        return tf.maximum(min_lr, initial_lr * decay_factor)
+
+def compute_stable_interior_loss(pinn, x_interior, c_interior):
+    """Compute interior loss with stability enhancements"""
+    # Forward pass predictions
+    c_pred = pinn.forward_pass(x_interior)
+
+    # Calculate raw errors
+    raw_errors = c_pred - c_interior
+
+    # Apply Huber loss for robustness to outliers
+    delta = 0.1
+    abs_errors = tf.abs(raw_errors)
+    quadratic = tf.minimum(abs_errors, delta)
+    linear = abs_errors - quadratic
+
+    # Combine for final loss
+    return tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
 
 
 def save_checkpoint(pinn: 'DiffusionPINN', save_dir: str, epoch: int) -> None:

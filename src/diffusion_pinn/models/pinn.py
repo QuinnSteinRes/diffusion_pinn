@@ -174,14 +174,10 @@ class DiffusionPINN(tf.Module):
         return dc_dt - D_value * laplacian_filtered
 
     def compute_pde_residual(self, x_f: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual with improved numerical stability"""
-        # For small inputs, just compute directly
-        if tf.shape(x_f)[0] <= 1000:
-            return self.compute_single_batch_residual(x_f)
-
-        # For larger inputs, process in batches with adaptive size
+        """Compute PDE residual with improved stability and consistent batch processing"""
+        # Process in fixed-size batches for more consistency
+        batch_size = 512  # Fixed size for consistent behavior
         total_points = tf.shape(x_f)[0]
-        batch_size = tf.minimum(1000, total_points // 10)  # Adaptive batch size
         num_batches = (total_points - 1) // batch_size + 1
 
         residuals = []
@@ -196,50 +192,51 @@ class DiffusionPINN(tf.Module):
                 # Calculate function value
                 c = self.forward_pass(x_batch)
 
-                # First derivatives - get all at once
+                # First derivatives with intermediate normalization
                 grad = tape.gradient(c, x_batch)
+                # Apply softer gradient stabilization
+                grad_norm = tf.reduce_mean(tf.abs(grad))
+                grad_scale = tf.maximum(1.0, grad_norm / 10.0)  # Scale only if too large
+                grad = grad / grad_scale
 
-                # Apply gradient clipping for stability
-                grad = tf.clip_by_value(grad, -100.0, 100.0)
-
-                # Extract individual components with proper reshaping
+                # Extract components
                 dc_dx = tf.reshape(grad[:, 0], (-1, 1))
                 dc_dy = tf.reshape(grad[:, 1], (-1, 1))
                 dc_dt = tf.reshape(grad[:, 2], (-1, 1))
 
-            # Second derivatives with stabilization
+            # Second derivatives with softer stabilization
             d2c_dx2 = tape.gradient(dc_dx, x_batch)[:, 0:1]
             d2c_dy2 = tape.gradient(dc_dy, x_batch)[:, 1:2]
-
-            # Clip second derivatives to prevent extreme values
-            d2c_dx2 = tf.clip_by_value(d2c_dx2, -1000.0, 1000.0)
-            d2c_dy2 = tf.clip_by_value(d2c_dy2, -1000.0, 1000.0)
 
             # Cleanup
             del tape
 
-            # Ensure diffusion coefficient is positive during computation
-            D_value = tf.abs(self.D) + 1e-5
-
-            # Enhanced numerical stability with Huber-like approach for the Laplacian
+            # Robust laplacian calculation
             laplacian = d2c_dx2 + d2c_dy2
+            # Apply Huber-like loss concept to the Laplacian itself
             laplacian_mean = tf.reduce_mean(tf.abs(laplacian))
-            threshold = 10.0 * laplacian_mean
+            delta = 5.0 * laplacian_mean
 
-            # Smooth capping of extreme values
-            laplacian_filtered = tf.where(
-                tf.abs(laplacian) > threshold,
-                threshold * tf.tanh(laplacian / threshold),
+            # Smooth capping for outliers
+            laplacian_stabilized = tf.where(
+                tf.abs(laplacian) > delta,
+                delta * tf.tanh(laplacian / delta),
                 laplacian
             )
 
-            # Calculate residual with outlier handling
-            residual = dc_dt - D_value * laplacian_filtered
+            # Scale gradients back if we scaled them earlier
+            if grad_scale > 1.0:
+                dc_dt = dc_dt * grad_scale
+                laplacian_stabilized = laplacian_stabilized * grad_scale
 
-            # Apply final residual clipping for extreme outliers
-            residual_clipped = tf.clip_by_value(residual, -1e3, 1e3)
+            # Ensure D is positive but not too small
+            D_value = tf.maximum(1e-6, self.D)
 
-            residuals.append(residual_clipped)
+            # Calculate residual with softer handling
+            residual = dc_dt - D_value * laplacian_stabilized
+
+            # Save for this batch
+            residuals.append(residual)
 
         # Combine all batch residuals
         return tf.concat(residuals, axis=0)
