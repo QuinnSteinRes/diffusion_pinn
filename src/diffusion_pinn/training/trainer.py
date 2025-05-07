@@ -115,7 +115,17 @@ def train_pinn(pinn: 'DiffusionPINN',
 
             # Apply learning rate if optimizer supports it
             if hasattr(optimizer, 'learning_rate'):
-                optimizer.learning_rate.assign(current_lr)
+                if hasattr(optimizer.learning_rate, 'assign'):
+                    # For Variable learning rates
+                    optimizer.learning_rate.assign(current_lr)
+                elif isinstance(optimizer.learning_rate, tf.Variable):
+                    # Another way to check for Variable
+                    optimizer.learning_rate.assign(current_lr)
+                else:
+                    # For schedule-based or tensor learning rates
+                    # Skip the direct assignment and just log the value
+                    print(f"Using schedule-based learning rate: {optimizer.get_config()['learning_rate']}")
+                    print(f"Current recommended lr value: {current_lr:.6f}")
 
             # Training step with gradient tape
             with tf.GradientTape() as tape:
