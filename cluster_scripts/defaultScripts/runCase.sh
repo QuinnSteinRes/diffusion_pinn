@@ -18,7 +18,7 @@ source ~/.bashrc
 ulimit -c unlimited
 
 # Set environment variables for better error reporting
-export TF_CPP_MIN_LOG_LEVEL=0  # Show all TensorFlow logs 
+export TF_CPP_MIN_LOG_LEVEL=0  # Show all TensorFlow logs
 export PYTHONUNBUFFERED=1      # Ensure Python output is not buffered
 export OMP_NUM_THREADS=2       # Limit OpenMP threads
 export MKL_NUM_THREADS=2       # Limit MKL threads
@@ -70,7 +70,7 @@ mkdir $caseFolderName
 rsync -a $caseFolder/ ./$caseFolderName/
 cd $caseFolderName
 
-# Monitor memory usage in background 
+# Monitor memory usage in background
 (
     while true; do
         echo "$(date): Memory usage: $(free -m | grep Mem | awk '{print $3}')MB" >> memory_monitor.log
@@ -82,7 +82,7 @@ MONITOR_PID=$!
 # Run with error handling
 echo "Starting Python execution at $(date)" > execution.log
 {
-    python pinn_trainer.py --epochs 20000
+    python pinn_trainer.py #--epochs 20000
     exit_code=$?
     echo "Python exit code: $exit_code" >> execution.log
 } >> logRun 2>&1
