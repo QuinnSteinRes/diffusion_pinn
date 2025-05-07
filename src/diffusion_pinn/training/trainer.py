@@ -4,6 +4,7 @@ import numpy as np
 import os
 import json
 from ..variables import PINN_VARIABLES
+from ..models.pinn import DiffusionPINN
 
 def create_and_initialize_pinn(inputfile: str,
                              N_u: int = PINN_VARIABLES['N_u'],
