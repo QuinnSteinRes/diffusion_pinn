@@ -111,7 +111,7 @@ def train_pinn(pinn: 'DiffusionPINN',
                 tf.keras.backend.clear_session()
 
             # Calculate smooth learning rate
-            current_lr = get_smooth_lr(epoch, phase1_epochs, initial_lr=1e-3, min_lr=1e-5)
+            current_lr = get_smooth_lr(epoch, phase1_epochs, initial_lr=1e-4, min_lr=1e-5)
 
             # Apply learning rate if optimizer supports it
             if hasattr(optimizer, 'learning_rate'):
@@ -320,7 +320,7 @@ def train_pinn(pinn: 'DiffusionPINN',
         phase3_weights = {
             'initial': 1.0,      # Balanced initial conditions
             'boundary': 1.0,     # Balanced boundary conditions
-            'interior': 5.0,     # Higher weight on interior data points
+            'interior': 10.0,     # Higher weight on interior data points
             'physics': 3.0       # Reduced physics weight to prioritize data
         }
 
@@ -507,7 +507,7 @@ def copy_model_parameters(target_model, source_model):
     if source_model.config.diffusion_trainable:
         target_model.D.assign(source_model.D.numpy())
 
-def get_smooth_lr(epoch, total_epochs, initial_lr=1e-3, min_lr=1e-5):
+def get_smooth_lr(epoch, total_epochs, initial_lr=1e-4, min_lr=1e-5):
     """Smooth learning rate schedule without restarts"""
     # Warmup phase
     warmup_epochs = min(200, total_epochs // 10)
