@@ -196,7 +196,7 @@ def setup_directories(base_dir):
     """Create and return directory paths for outputs"""
     results_dir = os.path.join(base_dir, "results")
     save_dir = os.path.join(base_dir, "saved_models")
-    log_dir = os.path.join(base_dir, "logs")
+    log_dir = os.path.join(base_dir, "tensorboard_data")
 
     # Create directories
     for dir_path in [results_dir, save_dir, log_dir]:
