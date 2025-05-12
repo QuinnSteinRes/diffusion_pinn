@@ -16,7 +16,7 @@ OPTIMIZATION_SETTINGS = {
 
     ##### OPTIMIZER SETTINGS #####
     # Number of iterations for the Bayesian optimizer
-    "iterations_optimizer": 30,
+    "iterations_optimizer": 20,
     # Acquisition function for Bayesian optimization
     "acquisitionFunction": "EI",
     # Number of random starts (as fraction of total iterations)
@@ -47,7 +47,7 @@ OPTIMIZATION_SETTINGS = {
     "layers_lowerBound": 1,
     "layers_upperBound": 10,  # Reduced from 25
     # Neurons search range
-    "neurons_lowerBound": 5,
+    "neurons_lowerBound": 8,
     "neurons_upperBound": 256,  # Reduced from 512
     # Learning rate search range
     "learning_lowerBound": 1e-6,  # Increased from 1e-8
@@ -75,7 +75,7 @@ OPTIMIZATION_SETTINGS = {
     "loss_weights": {
         "data": 1.0,
         "initial": 1.0,
-        "boundary": 1.0,
+        "boundary": 3.0,
         "physics": 5.0
     },
 
