@@ -195,17 +195,16 @@ def preprocess_data(input_file):
 def setup_directories(base_dir):
     """Create and return directory paths for outputs"""
     results_dir = os.path.join(base_dir, "results")
-    plot_dir = os.path.join(base_dir, "plots")
     save_dir = os.path.join(base_dir, "saved_models")
     log_dir = os.path.join(base_dir, "logs")
 
     # Create directories
-    for dir_path in [results_dir, plot_dir, save_dir, log_dir]:
+    for dir_path in [results_dir, save_dir, log_dir]:
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
             print(f"Created directory: {dir_path}")
 
-    return results_dir, plot_dir, save_dir, log_dir
+    return results_dir, save_dir, log_dir
 
 def save_summary(base_dir, D_final, loss_history, converged=False):
     """Save summary statistics"""
@@ -312,7 +311,7 @@ def main(args):
 
     try:
         # Setup directories
-        results_dir, plot_dir, save_dir, log_dir = setup_directories(args.output_dir)
+        results_dir, save_dir, log_dir = setup_directories(args.output_dir)
 
         # Force garbage collection before starting
         gc.collect()
@@ -386,14 +385,14 @@ def main(args):
             import matplotlib.pyplot as plt
 
             # Plot loss history
-            plot_loss_history(loss_history, save_dir=results_dir)
-            plt.savefig(os.path.join(plot_dir, 'loss_history.png'))
-            plt.close()
+            #plot_loss_history(loss_history, save_dir=results_dir)
+            #plt.savefig(os.path.join(plot_dir, 'loss_history.png'))
+            #plt.close()
 
             # Plot diffusion coefficient convergence
-            plot_diffusion_convergence(D_history, save_dir=results_dir)
-            plt.savefig(os.path.join(plot_dir, 'd_convergence.png'))
-            plt.close()
+            #plot_diffusion_convergence(D_history, save_dir=results_dir)
+            #plt.savefig(os.path.join(plot_dir, 'd_convergence.png'))
+            #plt.close()
 
             # Plot solutions
             data_processor = DiffusionDataProcessor(processed_file)
@@ -402,7 +401,7 @@ def main(args):
                 pinn=pinn,
                 data_processor=data_processor,
                 t_indices=t_indices,
-                save_path=os.path.join(plot_dir, 'final_solutions.png')
+                save_path=os.path.join(results_dir, 'final_solutions.png')
             )
         except Exception as e:
             print(f"Warning: Error during plotting: {str(e)}")

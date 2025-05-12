@@ -111,7 +111,7 @@ def train_pinn(pinn: 'DiffusionPINN',
                 tf.keras.backend.clear_session()
 
             # Calculate smooth learning rate
-            current_lr = get_smooth_lr(epoch, phase1_epochs, initial_lr=1e-4, min_lr=1e-5)
+            current_lr = get_smooth_lr(epoch, phase1_epochs, initial_lr=1e-3, min_lr=1e-5)
 
             # Apply learning rate if optimizer supports it
             if hasattr(optimizer, 'learning_rate'):
