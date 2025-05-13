@@ -5,8 +5,6 @@
 #$ -pe mpich 1
 #$ -P OzelGroup
 ##$ -P WolframGroup
-# Remove the specific host request that's causing problems
-##$ -l h=compute-0-6
 
 # Source bashrc
 source ~/.bashrc
@@ -34,10 +32,14 @@ echo $CONDA_DEFAULT_ENV
 echo "Listing pip packages:"
 pip list
 
-# Add the correct absolute path to PYTHONPATH
+# Add the correct absolute path to PYTHONPATH and fix C++ library issues
 export PYTHONPATH="/state/partition1/home/qs8/projects/diffusion_pinn${PYTHONPATH:+:$PYTHONPATH}"
 echo "Final PYTHONPATH:"
 echo $PYTHONPATH
+
+# Try to fix the libstdc++ issue by ignoring system libraries
+export CONDA_OVERRIDE_GLIBC=2.35  # This might help with some library conflicts
+export LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6"  # Force using conda's libraries
 
 # Case folder setup
 caseFolder=$PWD
@@ -65,14 +67,24 @@ ls -la ./$caseFolderName/
 
 # Go to case folder and run
 cd $caseFolderName
-# Add these lines to fix the TLS issue
-export LD_PREFER_ENV_VARS=1
-export LD_DYNAMIC_WEAK=1
-export LD_PRELOAD="$CONDA_PREFIX/lib/libcublas.so:$CONDA_PREFIX/lib/libcudnn.so"
-# Run the optimization script instead of pinn_trainer.py
-python optimize_bayesian.py 1> logRun
+
+# Run the minimal version that avoids matplotlib
+echo "Starting optimization script at $(date)" > logRun
+python optimize_minimal.py >> logRun 2>&1 || echo "Script failed with exit code $?" >> logRun
+
+# Check if logRun is still empty or very small
+if [ ! -s logRun ] || [ $(wc -c < logRun) -lt 100 ]; then
+    echo "WARNING: logRun file is empty or very small. Creating debug info." > $caseFolder/empty_log_debug.txt
+    echo "Python path:" >> $caseFolder/empty_log_debug.txt
+    python -c "import sys; print(sys.path)" >> $caseFolder/empty_log_debug.txt 2>&1
+    echo "Directory contents:" >> $caseFolder/empty_log_debug.txt
+    ls -la >> $caseFolder/empty_log_debug.txt 2>&1
+    echo "Environment:" >> $caseFolder/empty_log_debug.txt
+    env >> $caseFolder/empty_log_debug.txt 2>&1
+fi
 
 # Cleanup and sync back
 cd ..
+echo "Syncing results back to $caseFolder"
 rsync -uavz ./$caseFolderName/ $caseFolder/
 rm -rf $caseFolderName
