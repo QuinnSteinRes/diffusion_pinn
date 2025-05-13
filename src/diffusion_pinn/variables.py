@@ -1,6 +1,6 @@
 PINN_VARIABLES = {
     # Network Architecture - Better balanced architecture
-    'hidden_layers': [32, 64, 128, 64, 32],  # Deeper, gradually expanding then contracting
+    'hidden_layers': [16],  # Deeper, 32, 64, 128, 64, 32 gradually expanding then contracting
     'activation': 'tanh',  # tanh is generally better for PDEs
 
     # Training Parameters
