@@ -385,14 +385,14 @@ def main(args):
             import matplotlib.pyplot as plt
 
             # Plot loss history
-            #plot_loss_history(loss_history, save_dir=results_dir)
+            plot_loss_history(loss_history, save_dir=results_dir)
             #plt.savefig(os.path.join(plot_dir, 'loss_history.png'))
-            #plt.close()
+            plt.close()
 
             # Plot diffusion coefficient convergence
-            #plot_diffusion_convergence(D_history, save_dir=results_dir)
+            plot_diffusion_convergence(D_history, save_dir=results_dir)
             #plt.savefig(os.path.join(plot_dir, 'd_convergence.png'))
-            #plt.close()
+            plt.close()
 
             # Plot solutions
             data_processor = DiffusionDataProcessor(processed_file)
