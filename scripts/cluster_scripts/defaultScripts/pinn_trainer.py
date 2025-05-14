@@ -297,7 +297,14 @@ def main(args):
     print(f"Input file: {args.input_file}")
     print(f"Output directory: {args.output_dir}")
     print(f"Epochs: {args.epochs}")
+    print(f"Random seed: {args.seed}")
     print("="*50 + "\n")
+
+    # Set global random seeds
+    if args.seed is not None:
+        np.random.seed(args.seed)
+        tf.random.set_seed(args.seed)
+        random.seed(args.seed)
 
     # Set up signal handlers for crashes
     setup_signal_handlers(os.path.join(args.output_dir, 'crash_log.txt'))
@@ -326,7 +333,8 @@ def main(args):
             N_u=PINN_VARIABLES['N_u'],
             N_f=PINN_VARIABLES['N_f'],
             N_i=PINN_VARIABLES['N_i'],
-            initial_D=PINN_VARIABLES['initial_D']
+            initial_D=PINN_VARIABLES['initial_D'],
+            seed=args.seed
         )
 
         # Create optimizer with learning rate decay
@@ -453,6 +461,8 @@ if __name__ == "__main__":
                       help='Base directory for output')
     parser.add_argument('--epochs', type=int, default=PINN_VARIABLES['epochs'],
                       help='Number of training epochs')
+    parser.add_argument('--seed', type=int, default=42,
+                    help='Random seed for reproducibility')
 
     args = parser.parse_args()
     sys.exit(main(args))
