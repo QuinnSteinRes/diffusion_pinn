@@ -38,6 +38,15 @@ echo $PYTHONPATH
 echo "Conda environment:"
 echo $CONDA_DEFAULT_ENV
 
+# Fix the GLIBCXX issue by setting proper library paths
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+# Unset LD_PRELOAD as it might be causing conflicts
+unset LD_PRELOAD
+
+# Verify the available GLIBCXX versions for debugging
+echo "Checking available GLIBCXX versions:"
+strings $CONDA_PREFIX/lib/libstdc++.so.6 | grep GLIBCXX
+
 # Add the correct absolute path to PYTHONPATH
 export PYTHONPATH="/state/partition1/home/qs8/projects/diffusion_pinn${PYTHONPATH:+:$PYTHONPATH}"
 echo "Final PYTHONPATH:"
