@@ -7,43 +7,46 @@ set -e
 WORKDIR=$PWD
 
 # Array of case numbers
-#cases=(1 2 3 4 5 6 7 8 9 10)
-
 cases=(1)
 
 # Check if we're in the correct directory
-#if [ ! -d "run_1" ]; then
-#    echo "Error: Must be run from the 'runs' directory containing run_X folders"
-#    exit 1
-#fi
-
 echo "Starting multi-case submission"
 echo "Working directory: $WORKDIR"
+
+# Base seed for reproducibility (prime number for better distribution)
+BASE_SEED=42
 
 for casei in "${cases[@]}"
 do
     echo "Processing: run_$casei"
 
+    # Generate a unique seed for each case
+    CASE_SEED=$((BASE_SEED + casei * 97))  # Multiply by a prime for better distribution
+
     # Verify directory exists
     if [ ! -d "run_$casei" ]; then
-        #echo "Warning: Missing directory run_$casei"
-	echo "Creating directory run_$casei"
-	#mkdir run_$casei
-	cp -r $WORKDIR/defaultScripts run_$casei
-        #continue
+        echo "Creating directory run_$casei"
+        cp -r $WORKDIR/defaultScripts run_$casei
     fi
 
     cd "run_$casei"
 
-    # Copy and prepare runCase script
-    #cp ../../defaultScripts/runCaseNew.sh ./runCase.sh
-    #cp ../defaultScripts/runCaseNew.sh ./runCase.sh
+    # Update the runCase.sh script with the seed
     sed -i "s/CHARCASE/caseX_${casei}/g" runCase.sh
-    #chmod +x runCase.sh
+
+    # Check if the file contains the --seed parameter, add if missing
+    if grep -q "\-\-seed" runCase.sh; then
+        # Update existing seed
+        sed -i "s/\-\-seed [0-9]*/--seed $CASE_SEED/g" runCase.sh
+    else
+        # Add seed parameter to python command
+        sed -i "s/python pinn_trainer\.py/python pinn_trainer.py --seed $CASE_SEED/g" runCase.sh
+    fi
+
+    echo "Using seed $CASE_SEED for run_$casei"
 
     # Submit job
     echo "Submitting job for run_$casei"
-    #qsub -N "caseX_${casei}" runCase.sh
     qsub runCase.sh
 
     cd "$WORKDIR"

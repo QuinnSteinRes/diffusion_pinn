@@ -9,6 +9,10 @@
 # Source bashrc
 source ~/.bashrc
 
+# Calculate seed from job ID for reproducibility
+SEED=$(($(echo "$JOB_ID" | cksum | cut -d ' ' -f 1) % 10000))
+echo "Using random seed: $SEED"
+
 # Debug: Print initial state
 echo "Initial conda info:"
 conda info
@@ -68,9 +72,9 @@ ls -la ./$caseFolderName/
 # Go to case folder and run
 cd $caseFolderName
 
-# Run the minimal version that avoids matplotlib
+# Run the minimal version that avoids matplotlib with seed
 echo "Starting optimization script at $(date)" > logRun
-python optimize_minimal.py >> logRun 2>&1 || echo "Script failed with exit code $?" >> logRun
+python optimize_minimal.py --seed $SEED >> logRun 2>&1 || echo "Script failed with exit code $?" >> logRun
 
 # Check if logRun is still empty or very small
 if [ ! -s logRun ] || [ $(wc -c < logRun) -lt 100 ]; then

@@ -17,6 +17,9 @@ echo "Number of runs: $NUM_RUNS"
 echo "Max layers: $MAX_LAYERS"
 echo "Epochs: $EPOCHS"
 
+# Base seed for reproducibility (prime number for better distribution)
+BASE_SEED=42
+
 # Make sure defaultScripts directory exists
 if [ ! -d "$WORKDIR/defaultScripts" ]; then
     echo "Error: defaultScripts directory not found!"
@@ -28,6 +31,10 @@ for casei in $(seq 1 $NUM_RUNS)
 do
     echo "Processing: run_$casei"
 
+    # Generate a unique seed for each case
+    CASE_SEED=$((BASE_SEED + casei * 97))  # Multiply by a prime for better distribution
+    echo "Using seed $CASE_SEED for run_$casei"
+
     # Verify directory exists
     if [ ! -d "run_$casei" ]; then
         echo "Creating directory run_$casei"
@@ -37,10 +44,10 @@ do
     # Copy required files
     cp "$WORKDIR/defaultScripts/optimize_layers_neurons.py" "run_$casei/"
     cp "$WORKDIR/defaultScripts/runCase_layers_neurons.sh" "run_$casei/runCase.sh"
-    
+
     # Copy data file
     cp "$WORKDIR/defaultScripts/intensity_time_series_spatial_temporal.csv" "run_$casei/"
-    
+
     # Add permissions
     chmod +x "run_$casei"/*.py
     chmod +x "run_$casei"/*.sh
@@ -51,8 +58,16 @@ do
     # Update job name in runCase script
     sed -i "s/CHARCASE/layers_${casei}/g" runCase.sh
 
-    # Submit job with customized parameters
-    echo "Submitting job for run_$casei with max_layers=$MAX_LAYERS, epochs=$EPOCHS"
+    # Submit job with customized parameters including seed
+    echo "Submitting job for run_$casei with max_layers=$MAX_LAYERS, epochs=$EPOCHS, seed=$CASE_SEED"
+
+    # Update the command in runCase.sh
+    COMMAND_LINE="python optimize_layers_neurons.py \\\\\n    --epochs $EPOCHS \\\\\n    --max-layers $MAX_LAYERS \\\\\n    --output-dir optimization_results \\\\\n    --seed $CASE_SEED"
+
+    # Replace the existing python command line
+    sed -i "s|python optimize_layers_neurons\.py.*$SEED|$COMMAND_LINE|" runCase.sh
+
+    # Submit the job
     qsub runCase.sh
 
     # Return to main directory

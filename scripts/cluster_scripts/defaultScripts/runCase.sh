@@ -52,6 +52,10 @@ echo $PYTHONPATH
 caseFolder=$PWD
 caseFolderName=$(echo $caseFolder | awk -F "/" '{print $(NF-1)""$NF}')
 
+# Calculate seed from case name or job ID for reproducibility
+SEED=$(($(echo "$caseFolderName" | cksum | cut -d ' ' -f 1) % 10000))
+echo "Using random seed: $SEED"
+
 echo "Case folder: $caseFolder"
 echo "Case folder name: $caseFolderName"
 
@@ -79,10 +83,10 @@ cd $caseFolderName
 ) &
 MONITOR_PID=$!
 
-# Run with error handling
+# Run with error handling and pass seed
 echo "Starting Python execution at $(date)" > execution.log
 {
-    python pinn_trainer.py #--epochs 20000
+    python pinn_trainer.py --seed $SEED #--epochs 20000
     exit_code=$?
     echo "Python exit code: $exit_code" >> execution.log
 } >> logRun 2>&1
