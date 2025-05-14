@@ -447,7 +447,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train PINN model for diffusion problem')
-    parser.add_argument('--input-file', type=str, default='intensity_time_series_spatial_temporal.csv',
+    parser.add_argument('--input-file', type=str, default=os.path.join(os.path.dirname(__file__), 'intensity_time_series_spatial_temporal.csv'),
                       help='Path to input CSV file')
     parser.add_argument('--output-dir', type=str, default='.',
                       help='Base directory for output')

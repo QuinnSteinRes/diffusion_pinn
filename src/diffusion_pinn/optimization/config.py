@@ -6,7 +6,7 @@ Centralized configuration settings for PINN optimization
 
 OPTIMIZATION_SETTINGS = {
     ##### INPUT/OUTPUT SETTINGS #####
-    "inputFile": "intensity_time_series_spatial_temporal.csv",
+    "inputFile": "../data/intensity_time_series_spatial_temporal.csv",
     "resultFolder": "trainingResults",
 
     ##### DATA PREPROCESSING SETTINGS #####
