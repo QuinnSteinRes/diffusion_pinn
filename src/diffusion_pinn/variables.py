@@ -9,6 +9,7 @@ PINN_VARIABLES = {
     'decay_steps': 1000,  # Will be used with custom scheduler
     'decay_rate': 0.95,
     'initial_D': 0.0001,  # Start from expected value range
+    'random_seed': 42,    # Default random seed for reproducibility
 
     # Sampling Points - Increased for better coverage
     'N_u': 1500,    # More boundary points

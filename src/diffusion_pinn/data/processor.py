@@ -8,14 +8,19 @@ import gc
 class DiffusionDataProcessor:
     """Data processor for diffusion PINN model"""
 
-    def __init__(self, inputfile: str, normalize_spatial: bool = True):
+    def __init__(self, inputfile: str, normalize_spatial: bool = True, seed: int = None):
         """
         Initialize data processor
 
         Args:
             inputfile: Path to CSV file containing x, y, t, intensity data
             normalize_spatial: If True, normalize spatial coordinates to [0,1]
+            seed: Random seed for reproducibility
         """
+        # Set random seed if provided
+        if seed is not None:
+            np.random.seed(seed)
+
         try:
             # Read data in chunks to reduce memory usage
             data = np.genfromtxt(inputfile, delimiter=',', skip_header=1, dtype=float)
@@ -187,7 +192,7 @@ class DiffusionDataProcessor:
             gc.collect()
 
     def prepare_training_data(self, N_u: int, N_f: int, N_i: int,
-                            temporal_density: int = 10) -> Dict[str, tf.Tensor]:
+                            temporal_density: int = 10, seed: int = None) -> Dict[str, tf.Tensor]:
         """
         Prepare training data for the PINN
 
@@ -196,10 +201,15 @@ class DiffusionDataProcessor:
             N_f: Number of collocation points
             N_i: Number of interior points with direct supervision
             temporal_density: Number of time points to generate between each frame
+            seed: Random seed for reproducibility
 
         Returns:
             Dictionary containing training data tensors
         """
+        try:
+            # Set random seed if provided
+            if seed is not None:
+                np.random.seed(seed)
         try:
             # Get boundary and interior points
             all_coords, all_values = self.get_boundary_and_interior_points()
@@ -223,11 +233,16 @@ class DiffusionDataProcessor:
             n_boundary = np.sum(boundary_mask)
             n_interior = np.sum(interior_mask)
 
-            # Sample points
             boundary_indices = np.random.choice(np.where(boundary_mask)[0], min(N_u, n_boundary),
                                             replace=(N_u > n_boundary))
             interior_indices = np.random.choice(np.where(interior_mask)[0], min(N_i, n_interior),
                                             replace=(N_i > n_interior))
+
+            # When generating collocation points with latin hypercube sampling
+            for t_val in batch_t:
+                xy_points = self.lb[0:2] + (self.ub[0:2]-self.lb[0:2])*lhs(2, N_f_per_t, seed=seed if seed is not None else None)
+                t_points = np.ones((N_f_per_t, 1)) * t_val
+                X_f_train.append(np.hstack((xy_points, t_points)))
 
             X_u_train = all_coords[boundary_indices]
             u_train = all_values[boundary_indices]

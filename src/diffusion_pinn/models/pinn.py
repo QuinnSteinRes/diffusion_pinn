@@ -12,10 +12,15 @@ class DiffusionPINN(tf.Module):
         spatial_bounds: Dict[str, Tuple[float, float]],
         time_bounds: Tuple[float, float],
         initial_D: float = PINN_VARIABLES['initial_D'],
-        config: DiffusionConfig = None
+        config: DiffusionConfig = None,
+        seed: int = None
     ):
         super().__init__()
         self.config = config or DiffusionConfig()
+
+        # Set random seed if provided
+        if seed is not None:
+            tf.random.set_seed(seed)
 
         # Store bounds for normalization
         self.x_bounds = spatial_bounds['x']

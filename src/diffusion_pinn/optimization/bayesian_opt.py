@@ -24,12 +24,18 @@ class PINNBayesianOptimizer:
         self,
         data_processor: 'DiffusionDataProcessor',
         opt_config: Dict = None,
-        save_dir: str = 'optimization_results'
+        save_dir: str = 'optimization_results',
+        seed: int = 42
     ):
         """Initialize optimizer with configuration"""
         self.data_processor = data_processor
         self.config = opt_config or OPTIMIZATION_SETTINGS
         self.save_dir = save_dir
+        self.seed = seed
+
+        # Set random seed
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
 
         # Create output directories
         self.model_dir = os.path.join(save_dir, 'models')
@@ -98,7 +104,8 @@ class PINNBayesianOptimizer:
             spatial_bounds=domain_info['spatial_bounds'],
             time_bounds=domain_info['time_bounds'],
             initial_D=PINN_VARIABLES['initial_D'],
-            config=config
+            config=config,
+            seed=self.seed
         )
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
@@ -218,7 +225,7 @@ class PINNBayesianOptimizer:
             n_random_starts=self.config['iterations_optimizer'] // 3,
             x0=x0,
             acq_func=self.config['acquisitionFunction'],
-            random_state=42
+            random_state=self.seed  # Use the seed for reproducibility
         )
 
         # Format results

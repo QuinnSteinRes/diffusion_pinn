@@ -10,7 +10,8 @@ def create_and_initialize_pinn(inputfile: str,
                              N_u: int = PINN_VARIABLES['N_u'],
                              N_f: int = PINN_VARIABLES['N_f'],
                              N_i: int = PINN_VARIABLES['N_i'],
-                             initial_D: float = PINN_VARIABLES['initial_D']) -> Tuple['DiffusionPINN', Dict[str, tf.Tensor]]:
+                             initial_D: float = PINN_VARIABLES['initial_D'],
+                             seed: int = PINN_VARIABLES['random_seed']) -> Tuple['DiffusionPINN', Dict[str, tf.Tensor]]:
     """
     Create and initialize PINN with data
 
@@ -20,6 +21,7 @@ def create_and_initialize_pinn(inputfile: str,
         N_f: Number of collocation points
         N_i: Number of interior supervision points
         initial_D: Initial guess for diffusion coefficient
+        seed: Random seed for reproducibility
 
     Returns:
         Tuple of (initialized PINN, training data dictionary)
@@ -28,8 +30,13 @@ def create_and_initialize_pinn(inputfile: str,
     from ..models.pinn import DiffusionPINN
     from ..config import DiffusionConfig
 
+    # Set random seeds
+    if seed is not None:
+        tf.random.set_seed(seed)
+        np.random.seed(seed)
+
     # Process data
-    data_processor = DiffusionDataProcessor(inputfile)
+    data_processor = DiffusionDataProcessor(inputfile, seed=seed)
 
     # Get domain information
     domain_info = data_processor.get_domain_info()
@@ -45,11 +52,12 @@ def create_and_initialize_pinn(inputfile: str,
         spatial_bounds=domain_info['spatial_bounds'],
         time_bounds=domain_info['time_bounds'],
         initial_D=initial_D,
-        config=config
+        config=config,
+        seed=seed
     )
 
     # Prepare training data
-    training_data = data_processor.prepare_training_data(N_u, N_f, N_i)
+    training_data = data_processor.prepare_training_data(N_u, N_f, N_i, seed=seed)
 
     return pinn, training_data
 
@@ -58,7 +66,8 @@ def train_pinn(pinn: 'DiffusionPINN',
               optimizer: tf.keras.optimizers.Optimizer,
               epochs: int = 100,
               save_dir: str = None,
-              checkpoint_frequency: int = 1000) -> Tuple[List[float], List[Dict[str, float]]]:
+              checkpoint_frequency: int = 1000,
+              seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
     """
     Training function with improved stability and EMA implementation
 
@@ -69,10 +78,16 @@ def train_pinn(pinn: 'DiffusionPINN',
         epochs: Number of training epochs
         save_dir: Directory to save checkpoints
         checkpoint_frequency: How often to save checkpoints
+        seed: Random seed for reproducibility
 
     Returns:
         Tuple of (diffusion coefficient history, loss history)
     """
+    # Set random seeds if provided
+    if seed is not None:
+        tf.random.set_seed(seed)
+        np.random.seed(seed)
+
     # Main history tracking
     D_history = []
     loss_history = []
@@ -462,8 +477,12 @@ def train_pinn(pinn: 'DiffusionPINN',
 
 # Helper functions for the train_pinn function
 
-def create_ema_model(source_model):
+def create_ema_model(source_model, seed=None):
     """Create a copy of the model for EMA tracking"""
+    # Set seed if provided
+    if seed is not None:
+        tf.random.set_seed(seed)
+
     # Get model configuration
     config = source_model.config
 
@@ -475,7 +494,8 @@ def create_ema_model(source_model):
         },
         time_bounds=source_model.t_bounds,
         initial_D=source_model.D.numpy(),
-        config=config
+        config=config,
+        seed=seed
     )
 
     # Copy initial weights

@@ -302,9 +302,9 @@ def main(args):
 
     # Set global random seeds
     if args.seed is not None:
-        np.random.seed(args.seed)
+        print(f"Setting random seeds to {args.seed}")
         tf.random.set_seed(args.seed)
-        random.seed(args.seed)
+        np.random.seed(args.seed)
 
     # Set up signal handlers for crashes
     setup_signal_handlers(os.path.join(args.output_dir, 'crash_log.txt'))
@@ -461,8 +461,8 @@ if __name__ == "__main__":
                       help='Base directory for output')
     parser.add_argument('--epochs', type=int, default=PINN_VARIABLES['epochs'],
                       help='Number of training epochs')
-    parser.add_argument('--seed', type=int, default=42,
-                    help='Random seed for reproducibility')
+    parser.add_argument('--seed', type=int, default=PINN_VARIABLES['random_seed'],
+                      help='Random seed for reproducibility')
 
     args = parser.parse_args()
     sys.exit(main(args))

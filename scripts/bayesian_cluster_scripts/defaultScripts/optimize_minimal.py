@@ -318,7 +318,7 @@ class MinimalBayesianOptimizer:
                 best_loss=self.best_loss,
                 best_params=self.best_params
             )
-            
+
             print(f"Checkpoint saved to {checkpoint_path}")
 
         except Exception as e:
@@ -452,13 +452,21 @@ def main():
     parser.add_argument('--epochs', type=int,
                         default=OPTIMIZATION_SETTINGS['network_epochs'],
                         help='Number of training epochs per iteration')
+    parser.add_argument('--seed', type=int,
+                        default=PINN_VARIABLES['random_seed'],
+                        help='Random seed for reproducibility')
     args = parser.parse_args()
 
-    # Create a custom configuration with command-line overrides
+    # Set global random seeds
+    tf.random.set_seed(args.seed)
+    np.random.seed(args.seed)
+
+    # Create custom configuration
     custom_config = update_config({
         'inputFile': args.input_file,
         'iterations_optimizer': args.iterations,
-        'network_epochs': args.epochs
+        'network_epochs': args.epochs,
+        'random_seed': args.seed
     })
 
     # Print configuration summary
@@ -505,7 +513,8 @@ def main():
             optimizer = MinimalBayesianOptimizer(
                 data_processor=data_processor,
                 config=custom_config,
-                save_dirs=dirs
+                save_dirs=dirs,
+                seed=args.seed
             )
 
             # Run optimization
