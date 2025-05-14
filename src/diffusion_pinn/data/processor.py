@@ -206,10 +206,10 @@ class DiffusionDataProcessor:
         Returns:
             Dictionary containing training data tensors
         """
-        try:
-            # Set random seed if provided
-            if seed is not None:
-                np.random.seed(seed)
+        # Set random seed if provided
+        if seed is not None:
+            np.random.seed(seed)
+
         try:
             # Get boundary and interior points
             all_coords, all_values = self.get_boundary_and_interior_points()
@@ -237,12 +237,6 @@ class DiffusionDataProcessor:
                                             replace=(N_u > n_boundary))
             interior_indices = np.random.choice(np.where(interior_mask)[0], min(N_i, n_interior),
                                             replace=(N_i > n_interior))
-
-            # When generating collocation points with latin hypercube sampling
-            for t_val in batch_t:
-                xy_points = self.lb[0:2] + (self.ub[0:2]-self.lb[0:2])*lhs(2, N_f_per_t, seed=seed if seed is not None else None)
-                t_points = np.ones((N_f_per_t, 1)) * t_val
-                X_f_train.append(np.hstack((xy_points, t_points)))
 
             X_u_train = all_coords[boundary_indices]
             u_train = all_values[boundary_indices]

@@ -9,6 +9,10 @@
 # Source bashrc
 source ~/.bashrc
 
+# Calculate seed from job ID for reproducibility
+SEED=$(($(echo "$JOB_ID" | cksum | cut -d ' ' -f 1) % 10000))
+echo "Using random seed: $SEED"
+
 # Set environment variables for better performance
 export TF_CPP_MIN_LOG_LEVEL=0  # Show all TensorFlow logs
 export PYTHONUNBUFFERED=1      # Ensure Python output is not buffered
@@ -37,15 +41,6 @@ echo "PYTHONPATH:"
 echo $PYTHONPATH
 echo "Conda environment:"
 echo $CONDA_DEFAULT_ENV
-
-# Fix the GLIBCXX issue by setting proper library paths
-export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
-# Unset LD_PRELOAD as it might be causing conflicts
-unset LD_PRELOAD
-
-# Verify the available GLIBCXX versions for debugging
-echo "Checking available GLIBCXX versions:"
-strings $CONDA_PREFIX/lib/libstdc++.so.6 | grep GLIBCXX
 
 # Add the correct absolute path to PYTHONPATH
 export PYTHONPATH="/state/partition1/home/qs8/projects/diffusion_pinn${PYTHONPATH:+:$PYTHONPATH}"
@@ -79,12 +74,13 @@ ls -la ./$caseFolderName/
 # Go to case folder and run
 cd $caseFolderName
 
-# Run the layers and neurons optimization script
+# Run the layers and neurons optimization script with seed
 echo "Starting optimization script at $(date)" > execution.log
 python optimize_layers_neurons.py \
     --epochs 5000 \
     --max-layers 5 \
-    --output-dir optimization_results >> execution.log 2>&1 || \
+    --output-dir optimization_results \
+    --seed $SEED >> execution.log 2>&1 || \
     echo "Script failed with exit code $?" >> execution.log
 
 # Check if logRun is still empty or very small
