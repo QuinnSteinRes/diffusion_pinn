@@ -13,15 +13,9 @@ cases=(1)
 echo "Starting multi-case submission"
 echo "Working directory: $WORKDIR"
 
-# Base seed for reproducibility (prime number for better distribution)
-BASE_SEED=42
-
 for casei in "${cases[@]}"
 do
     echo "Processing: run_$casei"
-
-    # Generate a unique seed for each case
-    CASE_SEED=$((BASE_SEED + casei * 97))  # Multiply by a prime for better distribution
 
     # Verify directory exists
     if [ ! -d "run_$casei" ]; then
@@ -31,19 +25,16 @@ do
 
     cd "run_$casei"
 
-    # Update the runCase.sh script with the seed
+    # Update the case name in runCase.sh without changing the seed
     sed -i "s/CHARCASE/caseX_${casei}/g" runCase.sh
 
-    # Check if the file contains the --seed parameter, add if missing
+    # Remove any existing seed parameter to use the default from variables.py
     if grep -q "\-\-seed" runCase.sh; then
-        # Update existing seed
-        sed -i "s/\-\-seed [0-9]*/--seed $CASE_SEED/g" runCase.sh
-    else
-        # Add seed parameter to python command
-        sed -i "s/python pinn_trainer\.py/python pinn_trainer.py --seed $CASE_SEED/g" runCase.sh
+        # Remove the seed parameter entirely
+        sed -i "s/--seed [0-9]*//g" runCase.sh
     fi
 
-    echo "Using seed $CASE_SEED for run_$casei"
+    echo "Using default seed from variables.py for run_$casei"
 
     # Submit job
     echo "Submitting job for run_$casei"

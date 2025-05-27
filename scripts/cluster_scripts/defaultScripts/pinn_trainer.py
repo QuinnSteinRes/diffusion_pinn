@@ -300,11 +300,16 @@ def main(args):
     print(f"Random seed: {args.seed}")
     print("="*50 + "\n")
 
-    # Set global random seeds
     if args.seed is not None:
         print(f"Setting random seeds to {args.seed}")
         tf.random.set_seed(args.seed)
         np.random.seed(args.seed)
+    else:
+        # Use default seed from PINN_VARIABLES
+        default_seed = PINN_VARIABLES['random_seed']
+        print(f"Using default seed from variables.py: {default_seed}")
+        tf.random.set_seed(default_seed)
+        np.random.seed(default_seed)
 
     # Set up signal handlers for crashes
     setup_signal_handlers(os.path.join(args.output_dir, 'crash_log.txt'))
