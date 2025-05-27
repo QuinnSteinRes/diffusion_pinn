@@ -345,9 +345,7 @@ def main(args):
         # Create optimizer with learning rate decay
         print("Creating optimizer with learning rate decay...")
         optimizer = tf.keras.optimizers.Adam(
-            learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate=PINN_VARIABLES['learning_rate']
-            )
+            learning_rate=PINN_VARIABLES['learning_rate']
         )
 
         # Train the model
