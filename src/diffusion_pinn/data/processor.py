@@ -191,16 +191,109 @@ class DiffusionDataProcessor:
         finally:
             gc.collect()
 
+    def create_deterministic_collocation_points(self, N_f: int, seed: int = None) -> np.ndarray:
+        """
+        Create deterministic collocation points using quasi-random sequences
+        This replaces random Latin Hypercube Sampling with more deterministic Sobol sequences
+
+        Args:
+            N_f: Number of collocation points to generate
+            seed: Random seed for reproducibility
+
+        Returns:
+            Array of collocation points with shape (N_f, 3) for [x, y, t]
+        """
+        if seed is not None:
+            np.random.seed(seed)
+
+        print(f"Generating {N_f} deterministic collocation points using Sobol sequences...")
+
+        try:
+            # Use Sobol sequences for more uniform and deterministic coverage
+            from scipy.stats import qmc
+
+            # Create Sobol sampler - more deterministic than LHS
+            # scramble=False ensures reproducibility
+            sampler = qmc.Sobol(d=3, scramble=False, seed=seed)
+            points = sampler.random(N_f)
+
+            print("Using Sobol quasi-random sequences for collocation points")
+
+        except ImportError:
+            # Fallback to deterministic grid if scipy.stats.qmc not available
+            print("Warning: scipy.stats.qmc not available, using deterministic grid fallback")
+            points = self._create_deterministic_grid(N_f, seed)
+
+        # Scale to domain bounds
+        x_min, x_max = self.x.min(), self.x.max()
+        y_min, y_max = self.y.min(), self.y.max()
+        t_min, t_max = self.t.min(), self.t.max()
+
+        # Apply scaling deterministically
+        points[:, 0] = x_min + (x_max - x_min) * points[:, 0]  # x coordinates
+        points[:, 1] = y_min + (y_max - y_min) * points[:, 1]  # y coordinates
+        points[:, 2] = t_min + (t_max - t_min) * points[:, 2]  # t coordinates
+
+        print(f"Collocation points bounds: x=[{x_min:.4f}, {x_max:.4f}], "
+              f"y=[{y_min:.4f}, {y_max:.4f}], t=[{t_min:.4f}, {t_max:.4f}]")
+
+        return points
+
+    def _create_deterministic_grid(self, N_f: int, seed: int = None) -> np.ndarray:
+        """
+        Fallback method to create deterministic grid points when Sobol sequences unavailable
+
+        Args:
+            N_f: Number of points to generate
+            seed: Random seed for reproducibility
+
+        Returns:
+            Array of grid points with shape (N_f, 3) for [x, y, t]
+        """
+        print("Creating deterministic grid as fallback...")
+
+        # Create a deterministic grid
+        n_per_dim = int(np.ceil(N_f ** (1/3)))
+
+        # Create regular grid points in [0,1]^3
+        x_grid = np.linspace(0, 1, n_per_dim)
+        y_grid = np.linspace(0, 1, n_per_dim)
+        t_grid = np.linspace(0, 1, n_per_dim)
+
+        # Create meshgrid and flatten
+        X_grid, Y_grid, T_grid = np.meshgrid(x_grid, y_grid, t_grid, indexing='ij')
+        points = np.column_stack([
+            X_grid.flatten(),
+            Y_grid.flatten(),
+            T_grid.flatten()
+        ])
+
+        # If we have more points than needed, take first N_f deterministically
+        if len(points) > N_f:
+            # Use deterministic sampling based on seed
+            if seed is not None:
+                np.random.seed(seed)
+            indices = np.random.choice(len(points), N_f, replace=False)
+            indices.sort()  # Keep deterministic order
+            points = points[indices]
+        elif len(points) < N_f:
+            # If we need more points, replicate deterministically
+            n_repeats = (N_f // len(points)) + 1
+            points = np.tile(points, (n_repeats, 1))[:N_f]
+
+        print(f"Generated {len(points)} grid points")
+        return points
+
     def prepare_training_data(self, N_u: int, N_f: int, N_i: int,
                             temporal_density: int = 10, seed: int = None) -> Dict[str, tf.Tensor]:
         """
-        Prepare training data for the PINN
+        Prepare training data for the PINN with deterministic collocation points
 
         Args:
             N_u: Number of boundary points
             N_f: Number of collocation points
             N_i: Number of interior points with direct supervision
-            temporal_density: Number of time points to generate between each frame
+            temporal_density: Number of time points to generate between each frame (DEPRECATED)
             seed: Random seed for reproducibility
 
         Returns:
@@ -211,6 +304,8 @@ class DiffusionDataProcessor:
             np.random.seed(seed)
 
         try:
+            print(f"Preparing training data with N_u={N_u}, N_f={N_f}, N_i={N_i}")
+
             # Get boundary and interior points
             all_coords, all_values = self.get_boundary_and_interior_points()
 
@@ -233,10 +328,20 @@ class DiffusionDataProcessor:
             n_boundary = np.sum(boundary_mask)
             n_interior = np.sum(interior_mask)
 
+            print(f"Available boundary points: {n_boundary}, interior points: {n_interior}")
+
+            # Deterministic sampling using seed
+            if seed is not None:
+                np.random.seed(seed)
+
             boundary_indices = np.random.choice(np.where(boundary_mask)[0], min(N_u, n_boundary),
                                             replace=(N_u > n_boundary))
             interior_indices = np.random.choice(np.where(interior_mask)[0], min(N_i, n_interior),
                                             replace=(N_i > n_interior))
+
+            # Sort indices for deterministic order
+            boundary_indices.sort()
+            interior_indices.sort()
 
             X_u_train = all_coords[boundary_indices]
             u_train = all_values[boundary_indices]
@@ -244,32 +349,19 @@ class DiffusionDataProcessor:
             X_i_train = all_coords[interior_indices]
             u_i_train = all_values[interior_indices]
 
-            # Generate dense temporal collocation points
-            t_dense = np.linspace(self.t.min(), self.t.max(),
-                                len(self.t) * temporal_density)
+            print(f"Selected {len(X_u_train)} boundary points, {len(X_i_train)} interior points")
 
-            # Generate collocation points with denser temporal sampling
-            N_f_per_t = N_f // len(t_dense)
-            X_f_train = []
+            # UPDATED: Use deterministic collocation point generation
+            X_f_train = self.create_deterministic_collocation_points(N_f, seed=seed)
 
-            # Process collocation points in batches
-            batch_size = max(1, len(t_dense) // 4)
-            for t_start in range(0, len(t_dense), batch_size):
-                t_end = min(t_start + batch_size, len(t_dense))
-                batch_t = t_dense[t_start:t_end]
-
-                for t_val in batch_t:
-                    xy_points = self.lb[0:2] + (self.ub[0:2]-self.lb[0:2])*lhs(2, N_f_per_t)
-                    t_points = np.ones((N_f_per_t, 1)) * t_val
-                    X_f_train.append(np.hstack((xy_points, t_points)))
-
-                gc.collect()
-
-            X_f_train = np.vstack(X_f_train)
+            # Add boundary and interior points to collocation points for PDE training
+            print(f"Adding boundary and interior points to collocation set...")
             X_f_train = np.vstack((X_f_train, X_u_train, X_i_train))
 
+            print(f"Total collocation points (including boundary/interior): {len(X_f_train)}")
+
             # Convert to TensorFlow tensors
-            return {
+            training_data = {
                 'X_u_train': tf.convert_to_tensor(X_u_train, dtype=tf.float32),
                 'u_train': tf.convert_to_tensor(u_train, dtype=tf.float32),
                 'X_i_train': tf.convert_to_tensor(X_i_train, dtype=tf.float32),
@@ -278,6 +370,11 @@ class DiffusionDataProcessor:
                 'X_u_test': tf.convert_to_tensor(self.X_u_test, dtype=tf.float32),
                 'u_test': tf.convert_to_tensor(self.u, dtype=tf.float32)
             }
+
+            print("Training data preparation completed successfully")
+            print(f"Data shapes: X_u_train={X_u_train.shape}, X_i_train={X_i_train.shape}, X_f_train={X_f_train.shape}")
+
+            return training_data
 
         except Exception as e:
             print(f"Error preparing training data: {str(e)}")

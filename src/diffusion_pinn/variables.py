@@ -1,26 +1,26 @@
 PINN_VARIABLES = {
-    # Network Architecture - Better balanced architecture
-    'hidden_layers': [16, 32, 64, 32, 16],  # Deeper, 32, 64, 128, 64, 32 gradually expanding then contracting
-    'activation': 'tanh',  # tanh is generally better for PDEs
+    # Network Architecture
+    'hidden_layers': [16, 32, 64, 32, 16],  # Balanced architecture
+    'activation': 'tanh',                   # Best for PDEs
 
-    # Training Parameters
-    'epochs': 15000,      # More epochs with multi-stage training
-    'learning_rate': 0.0005,  # Slightly lower initial learning rate for stability
-    'decay_steps': 1000,  # Will be used with custom scheduler
-    'decay_rate': 0.95,
-    'initial_D': 0.0001,  # Start from expected value range
-    'random_seed': 42,    # Default random seed for reproducibility
+    # Training
+    'epochs': 12000,                        # Enough for convergence
+    'learning_rate': 0.0005,                # Stable learning rate
+    'random_seed': 42,                      # For reproducibility
 
-    # Sampling Points - Increased for better coverage
-    'N_u': 1500,    # More boundary points
-    'N_f': 20000,   # More collocation points
-    'N_i': 10000,   # More interior points
+    # Diffusion coefficient
+    'initial_D': 0.0001,                    # Reasonable starting point
 
-    # Loss Weights - Better balanced for physics and data
+    # Sampling points
+    'N_u': 1000,    # Boundary points
+    'N_f': 15000,   # Physics points (PDE)
+    'N_i': 8000,    # Interior data points
+
+    # Loss weights - balanced for stability
     'loss_weights': {
         'initial': 1.0,
         'boundary': 1.0,
-        'interior': 5.0,  # Higher weight on interior data
-        'physics': 8.0    # Balanced physics weight
+        'interior': 3.0,
+        'physics': 5.0
     }
 }

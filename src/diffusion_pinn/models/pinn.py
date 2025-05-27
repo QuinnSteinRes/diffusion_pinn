@@ -7,20 +7,24 @@ from ..variables import PINN_VARIABLES
 
 class DiffusionPINN(tf.Module):
     """Physics-Informed Neural Network for diffusion problems"""
+
     def __init__(
         self,
         spatial_bounds: Dict[str, Tuple[float, float]],
         time_bounds: Tuple[float, float],
         initial_D: float = PINN_VARIABLES['initial_D'],
         config: DiffusionConfig = None,
-        seed: int = None
+        seed: int = None,
+        data_processor = None  # Add this parameter for smart initialization
     ):
         super().__init__()
         self.config = config or DiffusionConfig()
+        self.seed = seed  # Store seed for consistent initialization
 
         # Set random seed if provided
         if seed is not None:
             tf.random.set_seed(seed)
+            np.random.seed(seed)
 
         # Store bounds for normalization
         self.x_bounds = spatial_bounds['x']
@@ -33,12 +37,16 @@ class DiffusionPINN(tf.Module):
         self.ub = tf.constant([self.x_bounds[1], self.y_bounds[1], self.t_bounds[1]],
                             dtype=tf.float32)
 
+        # Smart initialization of diffusion coefficient
+        if data_processor is not None:
+            initial_D = self._initialize_diffusion_coefficient_smartly(data_processor)
+
         # Initialize diffusion coefficient with positivity constraint
         initial_D_value = max(initial_D, 1e-5)  # Ensure positive value
         self.D = tf.Variable(initial_D_value, dtype=tf.float32,
                            trainable=self.config.diffusion_trainable,
                            name='diffusion_coefficient',
-                           constraint=lambda x: tf.clip_by_value(x, 1e-5, 1.0))  # Add constraint
+                           constraint=lambda x: tf.clip_by_value(x, 1e-5, 1.0))
 
         # Store loss weights from variables
         self.loss_weights = PINN_VARIABLES['loss_weights']
@@ -47,46 +55,124 @@ class DiffusionPINN(tf.Module):
         self.boundary_tol = 1e-6
         self.initial_tol = 1e-6
 
-        # Build network architecture
+        # Build network architecture with enhanced initialization
         self._build_network()
 
+    def _initialize_diffusion_coefficient_smartly(self, data_processor):
+        """Initialize diffusion coefficient based on data characteristics"""
+        # Estimate characteristic length and time scales from data
+        domain_info = data_processor.get_domain_info()
+
+        # Characteristic length (use the larger dimension)
+        L_char = max(
+            domain_info['spatial_bounds']['x'][1] - domain_info['spatial_bounds']['x'][0],
+            domain_info['spatial_bounds']['y'][1] - domain_info['spatial_bounds']['y'][0]
+        )
+
+        # Characteristic time
+        T_char = domain_info['time_bounds'][1] - domain_info['time_bounds'][0]
+
+        # Estimate initial D based on diffusion scaling: L^2 ~ D*T
+        D_estimate = (L_char ** 2) / T_char
+
+        # Clamp to reasonable range based on physical expectations
+        D_initial = np.clip(D_estimate, 1e-5, 1e-2)
+
+        print(f"Smart initialization: L_char={L_char:.4f}, T_char={T_char:.4f}")
+        print(f"Estimated D: {D_estimate:.6f}, Clamped D: {D_initial:.6f}")
+
+        return D_initial
+
     def _build_network(self):
-        """Initialize neural network parameters"""
+        """Initialize neural network parameters with enhanced initialization"""
         # Full architecture including input (3: x,y,t) and output (1: concentration)
         architecture = [3] + self.config.hidden_layers + [1]
 
         self.weights = []
         self.biases = []
 
-        # Initialize weights and biases
+        # Initialize weights and biases with improved schemes
         for i in range(len(architecture)-1):
             input_dim, output_dim = architecture[i], architecture[i+1]
 
-            # Weight initialization
-            if self.config.initialization == 'glorot':
-                std_dv = np.sqrt(2.0 / (input_dim + output_dim))
-            else:  # He initialization
-                std_dv = np.sqrt(2.0 / input_dim)
+            # Enhanced initialization based on layer position
+            if i == 0:  # Input layer - use smaller variance to avoid saturation
+                std_dv = 0.1 / np.sqrt(input_dim)
+            elif i == len(architecture) - 2:  # Output layer - very small initialization
+                std_dv = 0.01 / np.sqrt(input_dim)
+            else:  # Hidden layers - modified Xavier/Glorot
+                if self.config.activation == 'tanh':
+                    # For tanh activation, use Xavier initialization
+                    std_dv = np.sqrt(2.0 / (input_dim + output_dim))
+                else:
+                    # For ReLU-like activations, use He initialization
+                    std_dv = np.sqrt(2.0 / input_dim)
 
-            w = tf.Variable(
-                tf.random.normal([input_dim, output_dim], dtype=tf.float32) * std_dv,
-                trainable=True,
-                name=f'w{i+1}'
-            )
-            b = tf.Variable(
-                tf.zeros([output_dim], dtype=tf.float32),
-                trainable=True,
-                name=f'b{i+1}'
-            )
+            # Initialize weights with controlled random values using stored seed
+            weight_seed = self.seed + i if self.seed is not None else None
+            if weight_seed is not None:
+                w = tf.Variable(
+                    tf.random.normal([input_dim, output_dim], dtype=tf.float32, seed=weight_seed) * std_dv,
+                    trainable=True,
+                    name=f'w{i+1}'
+                )
+            else:
+                w = tf.Variable(
+                    tf.random.normal([input_dim, output_dim], dtype=tf.float32) * std_dv,
+                    trainable=True,
+                    name=f'w{i+1}'
+                )
+
+            # Initialize biases with enhanced strategy
+            if i < len(architecture) - 2:
+                # Small positive bias for hidden layers to avoid dead neurons
+                bias_seed = self.seed + 100 + i if self.seed is not None else None
+                if bias_seed is not None:
+                    b_init = tf.random.uniform([output_dim], minval=0.01, maxval=0.05,
+                                             dtype=tf.float32, seed=bias_seed)
+                else:
+                    b_init = tf.random.uniform([output_dim], minval=0.01, maxval=0.05, dtype=tf.float32)
+            else:
+                # Zero bias for output layer
+                b_init = tf.zeros([output_dim], dtype=tf.float32)
+
+            b = tf.Variable(b_init, trainable=True, name=f'b{i+1}')
 
             self.weights.append(w)
             self.biases.append(b)
 
     def _normalize_inputs(self, x: tf.Tensor) -> tf.Tensor:
-        """Normalize inputs to [-1, 1]"""
-        #return 2.0 * (x - self.lb) / (self.ub - self.lb) - 1.0
-        return 2.0 * (tf.cast(x, tf.float32) - self.lb) / (self.ub - self.lb) - 1.0
+        """
+        Enhanced input normalization with improved numerical stability
 
+        Normalizes inputs to [-1, 1] with additional safeguards:
+        - Handles edge cases where bounds might be equal
+        - Ensures numerical stability with small denominators
+        - Maintains consistent data types
+        - Clips extreme values to prevent overflow
+        """
+        # Ensure input is float32 for consistency
+        x_float = tf.cast(x, tf.float32)
+
+        # Calculate range with numerical stability check
+        range_tensor = self.ub - self.lb
+
+        # Add small epsilon to prevent division by zero if any dimension has zero range
+        # This can happen if all data points have the same coordinate in one dimension
+        epsilon = tf.constant(1e-8, dtype=tf.float32)
+        safe_range = tf.maximum(range_tensor, epsilon)
+
+        # Normalize to [0, 1] first
+        normalized_01 = (x_float - self.lb) / safe_range
+
+        # Clip to handle any numerical issues that might push values outside [0,1]
+        normalized_01_clipped = tf.clip_by_value(normalized_01, 0.0, 1.0)
+
+        # Transform to [-1, 1]
+        normalized_final = 2.0 * normalized_01_clipped - 1.0
+
+        # Final safety clip to ensure we're exactly in [-1, 1]
+        return tf.clip_by_value(normalized_final, -1.0, 1.0)
 
     @tf.function
     def forward_pass(self, x: tf.Tensor) -> tf.Tensor:
@@ -102,7 +188,7 @@ class DiffusionPINN(tf.Module):
             else:
                 H = tf.nn.relu(H)
 
-        # Apply softplus to ensure non-negative output (concentration is non-negative)
+        # Apply final layer
         output = tf.matmul(H, self.weights[-1]) + self.biases[-1]
 
         # Option for non-negative output (uncomment if needed)
@@ -140,6 +226,7 @@ class DiffusionPINN(tf.Module):
             'boundary': x[bc_mask],
             'interior': x[interior_mask]
         }
+
     @tf.function
     def compute_single_batch_residual(self, x_batch: tf.Tensor) -> tf.Tensor:
         """Compute PDE residual for a single batch with improved numerical stability"""
@@ -249,16 +336,13 @@ class DiffusionPINN(tf.Module):
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,
                 x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
         """
-        Compute loss with separated components
+        Enhanced loss function with additional consistency terms for stable convergence
 
-        Args:
-            x_data: Input coordinates
-            c_data: Target concentration values
-            x_physics: Points for physics-informed loss
-            weights: Optional dictionary of loss weights
-
-        Returns:
-            Dictionary of loss components
+        This adds physical realism checks beyond just data fitting and PDE residuals:
+        - Mass conservation (diffusion should preserve total mass approximately)
+        - Positivity constraints (concentrations can't be negative)
+        - Smoothness requirements (solutions should be reasonably smooth)
+        - Diffusion coefficient regularization (keep D in physically reasonable range)
         """
         if weights is None:
             weights = self.loss_weights
@@ -267,7 +351,7 @@ class DiffusionPINN(tf.Module):
         condition_points = self.identify_condition_points(x_data)
         losses = {}
 
-        # Compute losses for each condition type
+        # Compute losses for each condition type with enhanced stability
         for condition_type in ['initial', 'boundary', 'interior']:
             points = condition_points[condition_type]
             if points.shape[0] > 0:
@@ -280,18 +364,27 @@ class DiffusionPINN(tf.Module):
                 if tf.reduce_any(mask):
                     c_pred = self.forward_pass(tf.boolean_mask(x_data, mask))
                     c_true = tf.boolean_mask(c_data, mask)
-                    losses[condition_type] = tf.reduce_mean(tf.square(c_pred - c_true))
+
+                    # ENHANCED: Use Huber loss instead of MSE for robustness to outliers
+                    delta = 0.1  # Huber loss parameter
+                    abs_error = tf.abs(c_pred - c_true)
+                    quadratic = tf.minimum(abs_error, delta)
+                    linear = abs_error - quadratic
+                    losses[condition_type] = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
                 else:
                     losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
             else:
                 losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
 
-        # Physics loss
+        # Enhanced Physics loss with stability measures
         if self.config.use_physics_loss and x_physics is not None and x_physics.shape[0] > 0:
             pde_residual = self.compute_pde_residual(x_physics)
 
-            # Apply Huber loss for PDE residual to reduce sensitivity to outliers
-            delta = 1.0
+            # ENHANCED: Multi-scale physics loss - emphasize different error magnitudes
+            residual_mean = tf.reduce_mean(tf.abs(pde_residual))
+
+            # Scale-aware Huber loss - adapts to the typical residual magnitude
+            delta = tf.maximum(0.1, residual_mean)
             abs_residual = tf.abs(pde_residual)
             quadratic = tf.minimum(abs_residual, delta)
             linear = abs_residual - quadratic
@@ -301,16 +394,147 @@ class DiffusionPINN(tf.Module):
         else:
             losses['physics'] = tf.constant(0.0, dtype=tf.float32)
 
-        # Total loss with regularization for diffusion coefficient
-        total_loss = sum(weights.get(key, 1.0) * losses[key] for key in losses.keys())
+        # NEW: Consistency losses - ensure physical reasonableness
+        consistency_losses = self.compute_consistency_losses(x_data, c_data)
+        losses.update(consistency_losses)
 
-        # Add regularization to keep D in reasonable range
-        d_reg = 0.01 * tf.square(tf.math.log(tf.abs(self.D) + 1e-6) - tf.math.log(0.01))
-        total_loss = total_loss + d_reg
-        losses['d_regularization'] = d_reg
+        # NEW: Enhanced diffusion coefficient regularization
+        d_reg_multiple = self.compute_diffusion_regularization()
+        losses.update(d_reg_multiple)
+
+        # Total loss with weighted components
+        total_loss = sum(weights.get(key, 1.0) * losses[key] for key in ['initial', 'boundary', 'interior', 'physics'])
+
+        # Add consistency and regularization terms with smaller weights
+        consistency_weight = 0.1  # Don't let consistency terms dominate
+        total_loss += consistency_weight * (
+            losses.get('mass_conservation', 0.0) +
+            losses.get('positivity', 0.0) +
+            losses.get('smoothness', 0.0)
+        )
+
+        # Add diffusion regularization terms
+        total_loss += sum(losses[key] for key in losses if key.startswith('d_reg'))
+
         losses['total'] = total_loss
-
         return losses
+
+    def compute_consistency_losses(self, x_data: tf.Tensor, c_data: tf.Tensor) -> Dict[str, tf.Tensor]:
+        """
+        Compute additional consistency losses for physical realism
+
+        These losses help ensure the PINN solution makes physical sense:
+        1. Mass conservation - total mass shouldn't change dramatically over time
+        2. Positivity - concentrations should be non-negative
+        3. Smoothness - nearby points should have similar concentrations
+        """
+        consistency_losses = {}
+
+        # 1. MASS CONSERVATION CHECK
+        # In diffusion, total mass should be approximately conserved
+        # (allowing for boundary flux but checking for unrealistic changes)
+        t_vals = tf.unique(x_data[:, 2])[0]
+        if len(t_vals) > 1:
+            mass_losses = []
+            for i in range(min(3, len(t_vals) - 1)):  # Check first few time points
+                t1, t2 = t_vals[i], t_vals[i + 1]
+
+                # Get predictions at these times
+                mask1 = tf.abs(x_data[:, 2] - t1) < 1e-6
+                mask2 = tf.abs(x_data[:, 2] - t2) < 1e-6
+
+                if tf.reduce_any(mask1) and tf.reduce_any(mask2):
+                    c1 = self.forward_pass(tf.boolean_mask(x_data, mask1))
+                    c2 = self.forward_pass(tf.boolean_mask(x_data, mask2))
+
+                    # Average concentration (proxy for mass)
+                    mass1 = tf.reduce_mean(c1)
+                    mass2 = tf.reduce_mean(c2)
+
+                    # Mass should change slowly (allow 50% change max)
+                    relative_change = tf.abs(mass1 - mass2) / (mass1 + 1e-6)
+                    mass_penalty = tf.nn.relu(relative_change - 0.5)  # Penalty if change > 50%
+                    mass_losses.append(mass_penalty)
+
+            if mass_losses:
+                consistency_losses['mass_conservation'] = tf.reduce_mean(mass_losses)
+            else:
+                consistency_losses['mass_conservation'] = tf.constant(0.0, dtype=tf.float32)
+        else:
+            consistency_losses['mass_conservation'] = tf.constant(0.0, dtype=tf.float32)
+
+        # 2. POSITIVITY CONSTRAINT
+        # Concentrations should be non-negative (physical requirement)
+        c_pred = self.forward_pass(x_data)
+        negative_penalty = tf.reduce_mean(tf.nn.relu(-c_pred))  # Penalty for negative values
+        consistency_losses['positivity'] = negative_penalty
+
+        # 3. SMOOTHNESS CONSTRAINT
+        # Nearby points should have similar concentrations (diffusion creates smooth solutions)
+        if x_data.shape[0] > 10:
+            # Sample random pairs of points for efficiency
+            n_pairs = min(50, x_data.shape[0] // 2)  # Check up to 50 pairs
+            indices = tf.range(tf.shape(x_data)[0])
+            shuffled_indices = tf.random.shuffle(indices)[:2*n_pairs]
+
+            smoothness_losses = []
+            for i in range(0, len(shuffled_indices) - 1, 2):
+                if i + 1 < len(shuffled_indices):
+                    idx1, idx2 = shuffled_indices[i], shuffled_indices[i + 1]
+                    x1, x2 = x_data[idx1], x_data[idx2]
+                    c1, c2 = c_pred[idx1], c_pred[idx2]
+
+                    # Calculate distance between points
+                    spatial_dist = tf.norm(x1[:2] - x2[:2])  # x,y distance
+                    temporal_dist = tf.abs(x1[2] - x2[2])    # time distance
+                    total_dist = spatial_dist + 0.1 * temporal_dist + 1e-6  # Weight time less
+
+                    # Concentration difference should be proportional to distance
+                    c_diff = tf.abs(c1 - c2)
+
+                    # Penalty if concentration changes too rapidly with distance
+                    smoothness_ratio = c_diff / total_dist
+                    smoothness_penalty = tf.nn.relu(smoothness_ratio - 10.0)  # Penalty if ratio > 10
+                    smoothness_losses.append(smoothness_penalty)
+
+            if smoothness_losses:
+                consistency_losses['smoothness'] = tf.reduce_mean(smoothness_losses)
+            else:
+                consistency_losses['smoothness'] = tf.constant(0.0, dtype=tf.float32)
+        else:
+            consistency_losses['smoothness'] = tf.constant(0.0, dtype=tf.float32)
+
+        return consistency_losses
+
+    def compute_diffusion_regularization(self) -> Dict[str, tf.Tensor]:
+        """
+        Multiple regularization terms for diffusion coefficient
+
+        These help keep the diffusion coefficient in physically reasonable ranges:
+        1. Range regularization - keep D near expected order of magnitude
+        2. Stability regularization - prevent extreme values that cause instability
+        """
+        d_reg_losses = {}
+
+        # 1. RANGE REGULARIZATION
+        # Keep D near expected order of magnitude (around 10^-4 for typical diffusion)
+        D_target = tf.constant(0.0001, dtype=tf.float32)  # Expected order of magnitude
+        d_reg_losses['d_reg_range'] = 0.01 * tf.square(
+            tf.math.log(self.D + 1e-8) - tf.math.log(D_target)
+        )
+
+        # 2. STABILITY REGULARIZATION
+        # Prevent extreme values that cause numerical instability
+        D_min_stable = tf.constant(1e-6, dtype=tf.float32)
+        D_max_stable = tf.constant(1e-2, dtype=tf.float32)
+
+        # Penalty for going outside stable range
+        d_reg_losses['d_reg_stability'] = 0.001 * (
+            tf.nn.relu(D_min_stable - self.D) +  # Penalty if too small
+            tf.nn.relu(self.D - D_max_stable)    # Penalty if too large
+        )
+
+        return d_reg_losses
 
     def get_trainable_variables(self) -> List[tf.Variable]:
         """Get all trainable variables"""
@@ -327,3 +551,9 @@ class DiffusionPINN(tf.Module):
     def get_diffusion_coefficient(self) -> float:
         """Get the current estimate of the diffusion coefficient"""
         return self.D.numpy()
+
+    def save(self, filepath: str):
+        """Save the model to a file"""
+        # This is a placeholder - implement based on your needs
+        print(f"Model saving to {filepath} - implement based on your requirements")
+        pass
