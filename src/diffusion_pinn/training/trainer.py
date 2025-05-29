@@ -136,7 +136,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
     D_min = 1e-6
     D_max = 1e-2
 
-    print(f"\n🔧 FIXED DETERMINISTIC TRAINING for {epochs} epochs")
+    print(f"\nFIXED DETERMINISTIC TRAINING for {epochs} epochs")
     print(f"KEY CHANGE: Data fitting gets priority over physics!")
     print(f"Phase breakdown: {[phase['epochs'] for phase in phase_configs]} epochs")
 
@@ -235,7 +235,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
             # Phase completion summary
             phase_final_D = D_history[-1]
             phase_final_loss = loss_history[-1]['total']
-            print(f"\n✅ Phase {phase_idx + 1} completed:")
+            print(f"\nPhase {phase_idx + 1} completed:")
             print(f"  Final D: {phase_final_D:.6f}")
             print(f"  Final Loss: {phase_final_loss:.6f}")
 
@@ -248,7 +248,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
         final_loss = loss_history[-1]['total']
 
         print(f"\n{'='*60}")
-        print("🎉 FIXED DETERMINISTIC TRAINING COMPLETED")
+        print("FIXED DETERMINISTIC TRAINING COMPLETED")
         print(f"{'='*60}")
         print(f"Total epochs: {epoch_counter}")
         print(f"Final diffusion coefficient: {final_D:.8f}")
@@ -266,13 +266,20 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
 
         print(f"Prediction range test: {pred_range.numpy():.6f}")
         if pred_range < 1e-6:
-            print("⚠️  WARNING: Still predicting uniform values!")
+            print("WARNING: Still predicting uniform values!")
         else:
-            print("✅ SUCCESS: Network predicting varying values!")
+            print("SUCCESS: Network predicting varying values!")
+
+        # Check final convergence
+        if len(D_history) >= 100:
+            recent_d = D_history[-100:]
+            final_std = np.std(recent_d) / np.mean(recent_d)
+            print(f"Final convergence metric: {final_std:.6f}")
+            print(f"Converged: {'Yes' if final_std < 0.01 else 'No'}")
 
         # Save final model
         if save_dir:
-            save_checkpoint(pinn, save_dir, "final_fixed")
+            save_checkpoint(pinn, save_dir, "final_deterministic")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
