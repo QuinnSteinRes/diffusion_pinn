@@ -38,7 +38,10 @@ class DiffusionPINN(tf.Module):
                             dtype=tf.float32)
 
         # Smart initialization of diffusion coefficient
-        if data_processor is not None:
+        #if data_processor is not None:
+        #    initial_D = self._initialize_diffusion_coefficient_smartly(data_processor)
+
+        if False:  # Disable smart initialization
             initial_D = self._initialize_diffusion_coefficient_smartly(data_processor)
 
         # Initialize diffusion coefficient with positivity constraint
