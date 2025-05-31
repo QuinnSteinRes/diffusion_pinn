@@ -91,7 +91,9 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
                            checkpoint_frequency: int = 1000,
                            seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
     """
-    FIXED: Deterministic training with DATA-FIRST approach
+    Deterministic training with fixed schedule and consistent convergence criteria
+    This replaces the existing multi-stage training with a completely deterministic approach
+    that eliminates sources of randomness in the training process.
     """
     # Set random seeds if provided
     if seed is not None:
@@ -101,43 +103,43 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
     D_history = []
     loss_history = []
 
-    # FIXED training schedule - DATA FIRST, then physics
+    # FIXED training schedule - no randomness in phase transitions
+    # These phases are completely deterministic and reproducible
     phase_configs = [
         {
-            'name': 'Phase 1: Data Learning ONLY',
-            'epochs': epochs // 3,  # 33% of total epochs
-            'weights': {'initial': 10.0, 'boundary': 10.0, 'interior': 20.0, 'physics': 0.0},  # NO PHYSICS!
+            'name': 'Phase 1: Physics Learning',
+            'epochs': epochs // 4,  # Always 25% of total epochs
+            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 0.5, 'physics': 10.0},
             'lr_schedule': lambda epoch, total: 1e-3 * (0.95 ** (epoch // 100)),
             'regularization': 0.001,
-            'description': 'Learn to fit the data WITHOUT physics interference'
+            'description': 'Focus on learning physics (PDE) constraints'
         },
         {
-            'name': 'Phase 2: Add Physics Gradually',
-            'epochs': epochs // 3,  # 33% of total epochs
-            'weights': {'initial': 5.0, 'boundary': 5.0, 'interior': 15.0, 'physics': 0.5},  # SMALL physics
+            'name': 'Phase 2: Data Fitting',
+            'epochs': epochs // 2,  # Always 50% of total epochs
+            'weights': {'initial': 1.0, 'boundary': 1.0, 'interior': 5.0, 'physics': 3.0},
             'lr_schedule': lambda epoch, total: 5e-4 * (0.98 ** (epoch // 50)),
             'regularization': 0.0005,
-            'description': 'Maintain data fit while gently adding physics'
+            'description': 'Balance physics with data fitting'
         },
         {
-            'name': 'Phase 3: Balanced Training',
-            'epochs': epochs // 3,  # 33% of total epochs
-            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 10.0, 'physics': 1.0},  # STILL data-focused
+            'name': 'Phase 3: Fine Tuning',
+            'epochs': epochs // 4,  # Always 25% of total epochs
+            'weights': {'initial': 0.5, 'boundary': 0.5, 'interior': 10.0, 'physics': 1.0},
             'lr_schedule': lambda epoch, total: 1e-4 * (0.99 ** (epoch // 25)),
             'regularization': 0.0001,
-            'description': 'Final balanced training with data priority'
+            'description': 'Fine-tune with emphasis on data accuracy'
         }
     ]
 
     epoch_counter = 0
     convergence_history = []
 
-    # Define acceptable range for diffusion coefficient
+    # Define acceptable range for diffusion coefficient (deterministic bounds)
     D_min = 1e-6
     D_max = 1e-2
 
-    print(f"\nFIXED DETERMINISTIC TRAINING for {epochs} epochs")
-    print(f"KEY CHANGE: Data fitting gets priority over physics!")
+    print(f"\nStarting deterministic training for {epochs} epochs")
     print(f"Phase breakdown: {[phase['epochs'] for phase in phase_configs]} epochs")
 
     try:
@@ -151,7 +153,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
             phase_start_epoch = epoch_counter
 
             for epoch in range(phase['epochs']):
-                # DETERMINISTIC learning rate
+                # DETERMINISTIC learning rate - same calculation every time
                 current_lr = phase['lr_schedule'](epoch, phase['epochs'])
 
                 # Set learning rate deterministically
@@ -159,14 +161,14 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
                     if hasattr(optimizer.learning_rate, 'assign'):
                         optimizer.learning_rate.assign(current_lr)
 
-                # Training step with FIXED weights (data-focused)
+                # Training step with DETERMINISTIC loss computation
                 with tf.GradientTape() as tape:
-                    # Compute losses with FIXED weights per phase
+                    # Compute losses with FIXED weights (no randomness)
                     losses = pinn.loss_fn(
                         x_data=data['X_u_train'],
                         c_data=data['u_train'],
-                        x_physics=data['X_f_train'] if phase['weights']['physics'] > 0 else None,
-                        weights=phase['weights']  # These are the FIXED weights
+                        x_physics=data['X_f_train'],
+                        weights=phase['weights']  # Fixed weights per phase
                     )
 
                     # Compute interior loss separately for stability
@@ -174,24 +176,22 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
                         pinn, data['X_i_train'], data['u_i_train']
                     )
 
-                    # DETERMINISTIC regularization
+                    # Add DETERMINISTIC regularization
                     l2_loss = phase['regularization'] * sum(
                         tf.reduce_sum(tf.square(w)) for w in pinn.weights
                     )
 
-                    # Diffusion coefficient regularization
-                    d_target = tf.constant(0.0001, dtype=tf.float32)
+                    # Diffusion coefficient regularization toward expected values
+                    d_target = tf.constant(0.0001, dtype=tf.float32)  # Fixed target
                     d_reg = 0.01 * tf.square(
                         tf.math.log(pinn.D + 1e-8) - tf.math.log(d_target)
                     )
 
-                    # Total loss calculation with CORRECT weights
+                    # Total loss calculation
                     total_loss = (
-                        phase['weights']['initial'] * losses['initial'] +
-                        phase['weights']['boundary'] * losses['boundary'] +
-                        phase['weights']['interior'] * interior_loss +
-                        phase['weights']['physics'] * losses.get('physics', 0.0) +
-                        l2_loss + d_reg
+                        losses['total'] +
+                        l2_loss +
+                        d_reg
                     )
 
                     losses['total'] = total_loss
@@ -221,10 +221,22 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
 
                 # DETERMINISTIC convergence checking every 100 epochs
                 if epoch_counter % 100 == 0:
-                    print(f"Epoch {epoch_counter:5d}: D={current_D:.6f}, "
-                          f"Data={losses['initial']:.2e}+{losses['boundary']:.2e}+{interior_loss:.2e}, "
-                          f"Physics={losses.get('physics', 0.0):.2e}, "
-                          f"Total={losses['total']:.2e}")
+                    # Check convergence over last 50 epochs
+                    if len(D_history) >= 50:
+                        recent_d = D_history[-50:]
+                        d_std = np.std(recent_d)
+                        d_mean = np.mean(recent_d)
+                        relative_std = d_std / d_mean if d_mean > 0 else float('inf')
+                        convergence_history.append(relative_std)
+                        print(f"Epoch {epoch_counter:5d}: D={current_D:.6f}, "
+                              f"Loss={losses['total']:.6f}, LR={current_lr:.2e}, "
+                              f"RelStd={relative_std:.6f}")
+                        # DETERMINISTIC early stopping criteria
+                        if (relative_std < 0.001 and
+                            len(convergence_history) >= 3 and
+                            all(conv < 0.001 for conv in convergence_history[-3:])):
+                            print(f"Converged at epoch {epoch_counter} (relative std < 0.001)")
+                            # Don't break - let it complete the phase for consistency
 
                 epoch_counter += 1
 
@@ -238,6 +250,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
             print(f"\nPhase {phase_idx + 1} completed:")
             print(f"  Final D: {phase_final_D:.6f}")
             print(f"  Final Loss: {phase_final_loss:.6f}")
+            print(f"  Epochs: {phase_start_epoch} to {epoch_counter-1}")
 
             # Save checkpoint after each phase
             if save_dir:
@@ -248,7 +261,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
         final_loss = loss_history[-1]['total']
 
         print(f"\n{'='*60}")
-        print("FIXED DETERMINISTIC TRAINING COMPLETED")
+        print("DETERMINISTIC TRAINING COMPLETED")
         print(f"{'='*60}")
         print(f"Total epochs: {epoch_counter}")
         print(f"Final diffusion coefficient: {final_D:.8f}")
