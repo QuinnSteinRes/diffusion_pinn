@@ -453,3 +453,50 @@ def create_and_initialize_pinn(inputfile: str,
     training_data = data_processor.prepare_training_data(N_u, N_f, N_i, seed=seed)
 
     return pinn, training_data
+
+def load_pretrained_pinn(load_dir: str, data_path: str) -> Tuple['DiffusionPINN', 'DiffusionDataProcessor']:
+    """
+    Load a pretrained PINN model
+
+    Args:
+        load_dir: Directory containing saved model
+        data_path: Path to data file
+
+    Returns:
+        Tuple of (loaded PINN, data processor)
+    """
+    from ..data.processor import DiffusionDataProcessor
+    from ..models.pinn import DiffusionPINN
+    from ..config import DiffusionConfig
+    import json
+
+    with open(os.path.join(load_dir, 'config.json'), 'r') as f:
+        config_dict = json.load(f)
+
+    data_processor = DiffusionDataProcessor(data_path, normalize_spatial=True)
+
+    config = DiffusionConfig(
+        hidden_layers=config_dict['hidden_layers'],
+        activation=config_dict['activation'],
+        initialization=config_dict['initialization'],
+        diffusion_trainable=config_dict['diffusion_trainable'],
+        use_physics_loss=config_dict['use_physics_loss']
+    )
+
+    pinn = DiffusionPINN(
+        spatial_bounds=config_dict['spatial_bounds'],
+        time_bounds=tuple(config_dict['time_bounds']),
+        initial_D=config_dict['D_value'],
+        config=config
+    )
+
+    with open(os.path.join(load_dir, 'weights.json'), 'r') as f:
+        weights_dict = json.load(f)
+    with open(os.path.join(load_dir, 'biases.json'), 'r') as f:
+        biases_dict = json.load(f)
+
+    for i in range(len(pinn.weights)):
+        pinn.weights[i].assign(weights_dict[f'weight_{i}'])
+        pinn.biases[i].assign(biases_dict[f'bias_{i}'])
+
+    return pinn, data_processor
