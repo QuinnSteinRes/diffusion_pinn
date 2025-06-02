@@ -63,8 +63,6 @@ def create_and_initialize_pinn(inputfile: str,
 
     return pinn, training_data
 
-# Replace the debug_data_distribution function in your trainer.py with this version:
-
 def debug_data_distribution(data: Dict[str, tf.Tensor]):
     """Debug function to check data distribution - NO UNICODE CHARACTERS"""
     print("\n=== DATA DISTRIBUTION DEBUG ===")
@@ -117,6 +115,31 @@ def debug_data_distribution(data: Dict[str, tf.Tensor]):
         count = np.sum(np.abs(x_u_train[:, 2] - t_val) < 1e-6)
         print(f"  t={t_val:.3f}: {count} points")
 
+    # ADD THIS: TARGETED DIAGNOSTIC FOR THE REAL ISSUE
+    print(f"\nTARGETED DIAGNOSTIC - Exact t=0 check:")
+    t_vals = x_u_train[:, 2]
+
+    # Check for exactly 0.0 (no tolerance)
+    exactly_zero = np.sum(t_vals == 0.0)
+    print(f"  Points with exactly t=0.0: {exactly_zero}")
+
+    # Check for very close to zero with different tolerances
+    print(f"  Points within different tolerances:")
+    for tol in [1e-10, 1e-8, 1e-6, 1e-4, 1e-2]:
+        count = np.sum(np.abs(t_vals) < tol)
+        print(f"    |t| < {tol:.0e}: {count} points")
+
+    # Show actual values of the "zero" points
+    zero_positions = np.where(np.abs(t_vals) < 1e-3)[0]
+    if len(zero_positions) > 0:
+        zero_values = t_vals[zero_positions]
+        print(f"  Actual 'zero' values (first 10): {zero_values[:10]}")
+        print(f"  Min 'zero' value: {zero_values.min():.12f}")
+        print(f"  Max 'zero' value: {zero_values.max():.12f}")
+        print(f"  All exactly 0.0: {np.all(zero_values == 0.0)}")
+    else:
+        print(f"  ERROR: No values found near t=0!")
+
     print("=== END DEBUG ===\n")
 
 def compute_stable_interior_loss(pinn, x_interior, c_interior):
@@ -151,7 +174,7 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                                  checkpoint_frequency: int = 1000,
                                  seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
     """
-    Deterministic training with logarithmic D parameterization - FIXED VERSION
+    Deterministic training with logarithmic D parameterization - WITH DEBUG
     """
     # Set random seeds if provided
     if seed is not None:
@@ -247,6 +270,44 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                     )
                     bc_mask = tf.logical_or(bc_x_mask, bc_y_mask)
                     bc_mask = tf.logical_and(bc_mask, tf.logical_not(ic_mask))
+
+                    # ADD DEBUG CODE HERE - Only on first epoch
+                    if epoch_counter == 0:
+                        print(f"\n=== MASK DEBUG ===")
+                        print(f"PINN t_bounds[0]: {pinn.t_bounds[0]} (type: {type(pinn.t_bounds[0])})")
+                        print(f"PINN x_bounds: {pinn.x_bounds}")
+                        print(f"PINN y_bounds: {pinn.y_bounds}")
+                        print(f"PINN initial_tol: {pinn.initial_tol}")
+                        print(f"PINN boundary_tol: {pinn.boundary_tol}")
+
+                        # Test simple equality
+                        exactly_zero = tf.reduce_sum(tf.cast(tf.equal(t, 0.0), tf.int32))
+                        print(f"Points exactly equal to 0.0: {exactly_zero}")
+
+                        # Test the actual mask
+                        ic_count = tf.reduce_sum(tf.cast(ic_mask, tf.int32))
+                        bc_count = tf.reduce_sum(tf.cast(bc_mask, tf.int32))
+                        print(f"ic_mask finds: {ic_count} points")
+                        print(f"bc_mask finds: {bc_count} points")
+                        print(f"Total classified: {ic_count + bc_count} / {t.shape[0]}")
+
+                        if exactly_zero != ic_count:
+                            print(f"PROBLEM: {exactly_zero} points equal 0.0 but ic_mask finds {ic_count}")
+                            print(f"This means the mask logic is wrong, not the data")
+
+                            # Additional diagnostics
+                            print(f"Debugging the difference calculation:")
+                            time_diff = t - pinn.t_bounds[0]
+                            print(f"  t - pinn.t_bounds[0] range: [{tf.reduce_min(time_diff):.12f}, {tf.reduce_max(time_diff):.12f}]")
+                            abs_diff = tf.abs(time_diff)
+                            print(f"  |t - pinn.t_bounds[0]| range: [{tf.reduce_min(abs_diff):.12f}, {tf.reduce_max(abs_diff):.12f}]")
+
+                            # Test with different tolerances
+                            for test_tol in [1e-10, 1e-8, 1e-6, 1e-4, 1e-2]:
+                                test_count = tf.reduce_sum(tf.cast(abs_diff < test_tol, tf.int32))
+                                print(f"  Tolerance {test_tol:.0e} would find: {test_count} points")
+
+                        print("=== END MASK DEBUG ===\n")
 
                     # Initialize losses dictionary
                     losses = {}
