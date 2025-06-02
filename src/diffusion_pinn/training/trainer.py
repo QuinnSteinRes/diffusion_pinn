@@ -63,9 +63,57 @@ def create_and_initialize_pinn(inputfile: str,
 
     return pinn, training_data
 
+def debug_data_distribution(data: Dict[str, tf.Tensor]):
+    """Debug function to check data distribution"""
+    print("\n=== DATA DISTRIBUTION DEBUG ===")
+
+    x_u_train = data['X_u_train'].numpy()
+    x_i_train = data['X_i_train'].numpy()
+    x_f_train = data['X_f_train'].numpy()
+
+    print(f"Boundary/Initial data shape: {x_u_train.shape}")
+    print(f"Interior data shape: {x_i_train.shape}")
+    print(f"Physics data shape: {x_f_train.shape}")
+
+    # Check coordinate ranges
+    print(f"\nBoundary/Initial data ranges:")
+    print(f"  x: [{x_u_train[:, 0].min():.4f}, {x_u_train[:, 0].max():.4f}]")
+    print(f"  y: [{x_u_train[:, 1].min():.4f}, {x_u_train[:, 1].max():.4f}]")
+    print(f"  t: [{x_u_train[:, 2].min():.4f}, {x_u_train[:, 2].max():.4f}]")
+
+    print(f"\nInterior data ranges:")
+    print(f"  x: [{x_i_train[:, 0].min():.4f}, {x_i_train[:, 0].max():.4f}]")
+    print(f"  y: [{x_i_train[:, 1].min():.4f}, {x_i_train[:, 1].max():.4f}]")
+    print(f"  t: [{x_i_train[:, 2].min():.4f}, {x_i_train[:, 2].max():.4f}]")
+
+    # Check for time = 0 points (initial conditions)
+    t_zero_boundary = np.sum(np.abs(x_u_train[:, 2]) < 1e-6)
+    t_zero_interior = np.sum(np.abs(x_i_train[:, 2]) < 1e-6)
+
+    print(f"\nInitial condition points (t≈0):")
+    print(f"  In boundary data: {t_zero_boundary}")
+    print(f"  In interior data: {t_zero_interior}")
+
+    # Check for boundary points (x=0, x=1, y=0, y=1)
+    boundary_x = np.logical_or(
+        np.abs(x_u_train[:, 0]) < 1e-6,
+        np.abs(x_u_train[:, 0] - 1.0) < 1e-6
+    )
+    boundary_y = np.logical_or(
+        np.abs(x_u_train[:, 1]) < 1e-6,
+        np.abs(x_u_train[:, 1] - 1.0) < 1e-6
+    )
+    boundary_points = np.logical_or(boundary_x, boundary_y)
+
+    print(f"\nSpatial boundary points:")
+    print(f"  In boundary data: {np.sum(boundary_points)}")
+
+    print("=== END DEBUG ===\n")
+
 def compute_stable_interior_loss(pinn, x_interior, c_interior):
     """Compute interior loss with stability enhancements"""
     if x_interior.shape[0] == 0:
+        print("Warning: No interior points provided")
         return tf.constant(0.0, dtype=tf.float32)
 
     # Forward pass predictions
@@ -81,7 +129,10 @@ def compute_stable_interior_loss(pinn, x_interior, c_interior):
     linear = abs_errors - quadratic
 
     # Combine for final loss
-    return tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
+    loss_value = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
+
+    print(f"Interior loss computed: {loss_value:.6f} for {x_interior.shape[0]} points")
+    return loss_value
 
 def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                                  data: Dict[str, tf.Tensor],
@@ -91,12 +142,15 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                                  checkpoint_frequency: int = 1000,
                                  seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
     """
-    Deterministic training with logarithmic D parameterization - UNBIASED VERSION
+    Deterministic training with logarithmic D parameterization - FIXED VERSION
     """
     # Set random seeds if provided
     if seed is not None:
         tf.random.set_seed(seed)
         np.random.seed(seed)
+
+    # Debug data distribution
+    debug_data_distribution(data)
 
     D_history = []
     log_D_history = []
@@ -167,18 +221,64 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
 
                 # Training step with logarithmic D
                 with tf.GradientTape() as tape:
-                    # Compute losses with fixed weights
-                    losses = pinn.loss_fn(
-                        x_data=data['X_u_train'],
-                        c_data=data['u_train'],
-                        x_physics=data['X_f_train'],
-                        weights=phase['weights']
-                    )
+                    # Extract coordinates for proper classification
+                    t = data['X_u_train'][:, 2]
+                    x_coord = data['X_u_train'][:, 0]
+                    y_coord = data['X_u_train'][:, 1]
 
-                    # Compute interior loss separately
-                    interior_loss = compute_stable_interior_loss(
-                        pinn, data['X_i_train'], data['u_i_train']
+                    # Create masks directly on training data
+                    ic_mask = tf.abs(t - pinn.t_bounds[0]) < pinn.initial_tol
+                    bc_x_mask = tf.logical_or(
+                        tf.abs(x_coord - pinn.x_bounds[0]) < pinn.boundary_tol,
+                        tf.abs(x_coord - pinn.x_bounds[1]) < pinn.boundary_tol
                     )
+                    bc_y_mask = tf.logical_or(
+                        tf.abs(y_coord - pinn.y_bounds[0]) < pinn.boundary_tol,
+                        tf.abs(y_coord - pinn.y_bounds[1]) < pinn.boundary_tol
+                    )
+                    bc_mask = tf.logical_or(bc_x_mask, bc_y_mask)
+                    bc_mask = tf.logical_and(bc_mask, tf.logical_not(ic_mask))
+
+                    # Initialize losses dictionary
+                    losses = {}
+
+                    # Initial condition loss
+                    if tf.reduce_any(ic_mask):
+                        c_pred_ic = pinn.forward_pass(tf.boolean_mask(data['X_u_train'], ic_mask))
+                        c_true_ic = tf.boolean_mask(data['u_train'], ic_mask)
+                        losses['initial'] = tf.reduce_mean(tf.square(c_pred_ic - c_true_ic))
+                    else:
+                        losses['initial'] = tf.constant(0.0, dtype=tf.float32)
+
+                    # Boundary condition loss
+                    if tf.reduce_any(bc_mask):
+                        c_pred_bc = pinn.forward_pass(tf.boolean_mask(data['X_u_train'], bc_mask))
+                        c_true_bc = tf.boolean_mask(data['u_train'], bc_mask)
+                        losses['boundary'] = tf.reduce_mean(tf.square(c_pred_bc - c_true_bc))
+                    else:
+                        losses['boundary'] = tf.constant(0.0, dtype=tf.float32)
+
+                    # Interior data loss
+                    if 'X_i_train' in data and data['X_i_train'].shape[0] > 0:
+                        interior_loss = compute_stable_interior_loss(
+                            pinn, data['X_i_train'], data['u_i_train']
+                        )
+                        losses['interior'] = interior_loss
+                    else:
+                        losses['interior'] = tf.constant(0.0, dtype=tf.float32)
+
+                    # Physics loss
+                    if pinn.config.use_physics_loss and data['X_f_train'].shape[0] > 0:
+                        pde_residual = pinn.compute_pde_residual(data['X_f_train'])
+                        residual_mean = tf.reduce_mean(tf.abs(pde_residual))
+                        delta = tf.maximum(0.1, residual_mean)
+                        abs_residual = tf.abs(pde_residual)
+                        quadratic = tf.minimum(abs_residual, delta)
+                        linear = abs_residual - quadratic
+                        physics_loss = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
+                        losses['physics'] = physics_loss
+                    else:
+                        losses['physics'] = tf.constant(0.0, dtype=tf.float32)
 
                     # L2 regularization on network weights
                     l2_loss = phase['regularization'] * sum(
@@ -190,14 +290,15 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
 
                     # Total loss calculation
                     total_loss = (
-                        losses['total'] +
-                        interior_loss +
+                        losses['initial'] * phase['weights']['initial'] +
+                        losses['boundary'] * phase['weights']['boundary'] +
+                        losses['interior'] * phase['weights']['interior'] +
+                        losses['physics'] * phase['weights']['physics'] +
                         l2_loss +
                         log_d_reg
                     )
 
                     losses['total'] = total_loss
-                    losses['interior'] = interior_loss
                     losses['l2_reg'] = l2_loss
                     losses['log_d_reg_unbiased'] = log_d_reg
 
@@ -228,9 +329,11 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                         convergence_metric = log_d_std
                         convergence_history.append(convergence_metric)
 
-                        print(f"Epoch {epoch_counter:5d}: D={current_D:.6e}, log(D)={current_log_D:.6f}, "
-                              f"Loss={losses['total']:.6f}, LR={current_lr:.2e}, "
-                              f"log(D)_std={convergence_metric:.6f}")
+                        print(f"Epoch {epoch_counter:5d}: D={current_D:.6e}, log(D)={current_log_D:.6f}")
+                        print(f"  Total Loss={losses['total']:.6f}, LR={current_lr:.2e}")
+                        print(f"  Initial={losses['initial']:.6f}, Boundary={losses['boundary']:.6f}")
+                        print(f"  Interior={losses['interior']:.6f}, Physics={losses['physics']:.6f}")
+                        print(f"  log(D)_std={convergence_metric:.6f}")
 
                         # Convergence criteria
                         if (convergence_metric < 0.01 and

@@ -322,38 +322,75 @@ class DiffusionPINN(tf.Module):
 
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,
                 x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
-        """Enhanced loss function with unbiased logarithmic D"""
+        """Fixed loss function with proper boundary/interior separation"""
         if weights is None:
             weights = self.loss_weights
 
-        # Separate points by condition type
-        condition_points = self.identify_condition_points(x_data)
         losses = {}
 
+        # Extract coordinates
+        t = x_data[:, 2]
+        x_coord = x_data[:, 0]
+        y_coord = x_data[:, 1]
+
+        # Create masks directly on x_data
+        # Initial condition mask (t = t_min)
+        ic_mask = tf.abs(t - self.t_bounds[0]) < self.initial_tol
+
+        # Boundary condition masks
+        bc_x_mask = tf.logical_or(
+            tf.abs(x_coord - self.x_bounds[0]) < self.boundary_tol,
+            tf.abs(x_coord - self.x_bounds[1]) < self.boundary_tol
+        )
+        bc_y_mask = tf.logical_or(
+            tf.abs(y_coord - self.y_bounds[0]) < self.boundary_tol,
+            tf.abs(y_coord - self.y_bounds[1]) < self.boundary_tol
+        )
+        bc_mask = tf.logical_or(bc_x_mask, bc_y_mask)
+
+        # Ensure boundary mask excludes initial condition points
+        bc_mask = tf.logical_and(bc_mask, tf.logical_not(ic_mask))
+
+        # Interior mask - points that are neither initial nor boundary
+        interior_mask = tf.logical_not(tf.logical_or(ic_mask, bc_mask))
+
         # Compute losses for each condition type
-        for condition_type in ['initial', 'boundary', 'interior']:
-            points = condition_points[condition_type]
-            if points.shape[0] > 0:
-                # Create mask by comparing coordinates
-                mask = tf.zeros(x_data.shape[0], dtype=tf.bool)
-                for point in points:
-                    point_match = tf.reduce_all(tf.abs(x_data - point) < self.boundary_tol, axis=1)
-                    mask = tf.logical_or(mask, point_match)
 
-                if tf.reduce_any(mask):
-                    c_pred = self.forward_pass(tf.boolean_mask(x_data, mask))
-                    c_true = tf.boolean_mask(c_data, mask)
+        # Initial condition loss
+        if tf.reduce_any(ic_mask):
+            c_pred_ic = self.forward_pass(tf.boolean_mask(x_data, ic_mask))
+            c_true_ic = tf.boolean_mask(c_data, ic_mask)
+            losses['initial'] = tf.reduce_mean(tf.square(c_pred_ic - c_true_ic))
+            print(f"Initial condition points: {tf.reduce_sum(tf.cast(ic_mask, tf.int32))}")
+        else:
+            losses['initial'] = tf.constant(0.0, dtype=tf.float32)
+            print("No initial condition points found")
 
-                    # Use Huber loss for robustness
-                    delta = 0.1
-                    abs_error = tf.abs(c_pred - c_true)
-                    quadratic = tf.minimum(abs_error, delta)
-                    linear = abs_error - quadratic
-                    losses[condition_type] = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
-                else:
-                    losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
-            else:
-                losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
+        # Boundary condition loss
+        if tf.reduce_any(bc_mask):
+            c_pred_bc = self.forward_pass(tf.boolean_mask(x_data, bc_mask))
+            c_true_bc = tf.boolean_mask(c_data, bc_mask)
+            losses['boundary'] = tf.reduce_mean(tf.square(c_pred_bc - c_true_bc))
+            print(f"Boundary condition points: {tf.reduce_sum(tf.cast(bc_mask, tf.int32))}")
+        else:
+            losses['boundary'] = tf.constant(0.0, dtype=tf.float32)
+            print("No boundary condition points found")
+
+        # Interior data loss
+        if tf.reduce_any(interior_mask):
+            c_pred_interior = self.forward_pass(tf.boolean_mask(x_data, interior_mask))
+            c_true_interior = tf.boolean_mask(c_data, interior_mask)
+
+            # Use Huber loss for robustness
+            delta = 0.1
+            abs_error = tf.abs(c_pred_interior - c_true_interior)
+            quadratic = tf.minimum(abs_error, delta)
+            linear = abs_error - quadratic
+            losses['interior'] = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
+            print(f"Interior points: {tf.reduce_sum(tf.cast(interior_mask, tf.int32))}")
+        else:
+            losses['interior'] = tf.constant(0.0, dtype=tf.float32)
+            print("No interior points found")
 
         # Physics loss
         if self.config.use_physics_loss and x_physics is not None and x_physics.shape[0] > 0:
@@ -372,14 +409,14 @@ class DiffusionPINN(tf.Module):
             losses['physics'] = tf.constant(0.0, dtype=tf.float32)
 
         # UNBIASED LOGARITHMIC D REGULARIZATION
-        # Only prevent extreme numerical overflow/underflow
         log_D_regularization = self.compute_log_d_regularization()
         losses.update(log_D_regularization)
 
         # Total loss with weighted components
-        total_loss = sum(weights.get(key, 1.0) * losses[key] for key in ['initial', 'boundary', 'interior', 'physics'])
+        total_loss = sum(weights.get(key, 1.0) * losses[key]
+                        for key in ['initial', 'boundary', 'interior', 'physics'])
 
-        # Add very minimal log(D) regularization terms
+        # Add minimal log(D) regularization terms
         total_loss += sum(losses[key] for key in losses if key.startswith('log_d_reg'))
 
         losses['total'] = total_loss
