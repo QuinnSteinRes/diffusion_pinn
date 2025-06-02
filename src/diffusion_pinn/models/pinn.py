@@ -6,7 +6,7 @@ from ..config import DiffusionConfig
 from ..variables import PINN_VARIABLES
 
 class DiffusionPINN(tf.Module):
-    """Physics-Informed Neural Network for diffusion problems with logarithmic D parameterization"""
+    """Physics-Informed Neural Network for diffusion problems with unbiased logarithmic D parameterization"""
 
     def __init__(
         self,
@@ -53,12 +53,12 @@ class DiffusionPINN(tf.Module):
             name='log_diffusion_coefficient'
         )
 
-        # Define reasonable bounds for log(D)
-        # For D in range [1e-8, 1e-2]: log(D) in range [-18.4, -4.6]
-        self.log_D_min = -20.0  # Corresponds to D ≈ 2e-9
-        self.log_D_max = -2.0   # Corresponds to D ≈ 0.135
+        # UNBIASED: Define VERY WIDE bounds for log(D) to avoid constraining solution
+        # Previous bounds were too restrictive
+        self.log_D_min = -16.0   # Corresponds to D ≈ 1e-7
+        self.log_D_max = -6.0    # Corresponds to D ≈ 2.5e-3
 
-        print(f"Log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
+        print(f"Unbiased log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
         print(f"Corresponding D bounds: [{np.exp(self.log_D_min):.2e}, {np.exp(self.log_D_max):.2e}]")
 
         # Store loss weights from variables
@@ -237,9 +237,10 @@ class DiffusionPINN(tf.Module):
         del tape
 
         # LOGARITHMIC PARAMETERIZATION: Convert log(D) to D
-        # Apply bounds constraint to log(D) first
-        constrained_log_D = tf.clip_by_value(self.log_D, self.log_D_min, self.log_D_max)
-        D_value = tf.exp(constrained_log_D)
+        # UNBIASED: Apply VERY SOFT bounds constraint to log(D)
+        # Only prevent extreme numerical overflow, not constrain solution
+        very_soft_log_D = tf.clip_by_value(self.log_D, self.log_D_min + 5.0, self.log_D_max - 5.0)
+        D_value = tf.exp(very_soft_log_D)
 
         # Enhanced numerical stability
         laplacian = d2c_dx2 + d2c_dy2
@@ -253,7 +254,7 @@ class DiffusionPINN(tf.Module):
         return dc_dt - D_value * laplacian_filtered
 
     def compute_pde_residual(self, x_f: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual with logarithmic D parameterization"""
+        """Compute PDE residual with unbiased logarithmic D parameterization"""
         # Process in fixed-size batches for consistency
         batch_size = 512
         total_points = tf.shape(x_f)[0]
@@ -305,9 +306,10 @@ class DiffusionPINN(tf.Module):
                 dc_dt = dc_dt * grad_scale
                 laplacian_stabilized = laplacian_stabilized * grad_scale
 
-            # LOGARITHMIC PARAMETERIZATION: Convert log(D) to D with bounds
-            constrained_log_D = tf.clip_by_value(self.log_D, self.log_D_min, self.log_D_max)
-            D_value = tf.exp(constrained_log_D)
+            # UNBIASED LOGARITHMIC PARAMETERIZATION: Convert log(D) to D
+            # Only prevent extreme numerical issues, don't constrain values
+            very_soft_log_D = tf.clip_by_value(self.log_D, self.log_D_min + 3.0, self.log_D_max - 3.0)
+            D_value = tf.exp(very_soft_log_D)
 
             # Calculate residual
             residual = dc_dt - D_value * laplacian_stabilized
@@ -320,7 +322,7 @@ class DiffusionPINN(tf.Module):
 
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,
                 x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
-        """Enhanced loss function with logarithmic D regularization"""
+        """Enhanced loss function with unbiased logarithmic D"""
         if weights is None:
             weights = self.loss_weights
 
@@ -369,36 +371,37 @@ class DiffusionPINN(tf.Module):
         else:
             losses['physics'] = tf.constant(0.0, dtype=tf.float32)
 
-        # LOGARITHMIC D REGULARIZATION
-        # Keep log(D) within reasonable bounds and near expected values
+        # UNBIASED LOGARITHMIC D REGULARIZATION
+        # Only prevent extreme numerical overflow/underflow
         log_D_regularization = self.compute_log_d_regularization()
         losses.update(log_D_regularization)
 
         # Total loss with weighted components
         total_loss = sum(weights.get(key, 1.0) * losses[key] for key in ['initial', 'boundary', 'interior', 'physics'])
 
-        # Add log(D) regularization terms with appropriate weights
+        # Add very minimal log(D) regularization terms
         total_loss += sum(losses[key] for key in losses if key.startswith('log_d_reg'))
 
         losses['total'] = total_loss
         return losses
 
     def compute_log_d_regularization(self) -> Dict[str, tf.Tensor]:
-        """Regularization terms for log(D) parameterization"""
+        """
+        UNBIASED regularization terms for log(D) parameterization
+        Only prevent extreme numerical issues, NO VALUE BIAS
+        """
         log_d_reg_losses = {}
 
-        # 1. BOUNDS REGULARIZATION
-        # Soft penalty for going outside reasonable bounds
-        log_d_reg_losses['log_d_reg_bounds'] = 0.001 * (
-            tf.nn.relu(self.log_D_min - self.log_D) +  # Penalty if too small
-            tf.nn.relu(self.log_D - self.log_D_max)    # Penalty if too large
+        # ONLY extreme bounds regularization to prevent numerical overflow
+        # Very weak penalty and only at extreme values close to the bounds
+        log_d_reg_losses['log_d_reg_bounds'] = 0.00001 * (
+            tf.nn.relu(self.log_D_min + 3.0 - self.log_D) +  # Only penalty very close to min bound
+            tf.nn.relu(self.log_D - self.log_D_max + 3.0)    # Only penalty very close to max bound
         )
 
-        # 2. STABILITY REGULARIZATION
-        # Prevent extreme jumps in log(D)
-        # Keep log(D) relatively stable during training
-        log_D_target = -9.2  # Corresponds to D ≈ 1e-4, reasonable middle value
-        # log_d_reg_losses['log_d_reg_stability'] = 0.0001 * tf.square(self.log_D - log_D_target)
+        # REMOVED: All target value bias
+        # REMOVED: All stability penalties that bias toward specific values
+        # REMOVED: All regularization that pushes toward expected ranges
 
         return log_d_reg_losses
 

@@ -83,37 +83,6 @@ def compute_stable_interior_loss(pinn, x_interior, c_interior):
     # Combine for final loss
     return tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
 
-def compute_enhanced_log_d_regularization(pinn):
-    """Enhanced regularization specifically for log(D) parameterization"""
-    if not hasattr(pinn, 'log_D'):
-        return tf.constant(0.0, dtype=tf.float32)
-
-    # Get current log(D) value
-    current_log_D = pinn.log_D
-
-    # Multiple regularization terms for log(D)
-    reg_terms = []
-
-    # 1. Keep log(D) in reasonable range for typical diffusion problems
-    # log_D_target = -9.2  # Corresponds to D ≈ 1e-4
-    # target_penalty = 0.0001 * tf.square(current_log_D - log_D_target)
-    # reg_terms.append(target_penalty)
-
-    # 2. Soft bounds penalty
-    log_D_min = -18.0
-    log_D_max = -4.0
-    bounds_penalty = 0.001 * (
-        tf.nn.relu(log_D_min - current_log_D) +
-        tf.nn.relu(current_log_D - log_D_max)
-    )
-    reg_terms.append(bounds_penalty)
-
-    # 3. Stability penalty to prevent rapid changes
-    stability_penalty = 0.00001 * tf.square(current_log_D + 9.0)
-    reg_terms.append(stability_penalty)
-
-    return sum(reg_terms)
-
 def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                                  data: Dict[str, tf.Tensor],
                                  optimizer: tf.keras.optimizers.Optimizer,
@@ -122,7 +91,7 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                                  checkpoint_frequency: int = 1000,
                                  seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
     """
-    Deterministic training with logarithmic D parameterization
+    Deterministic training with logarithmic D parameterization - UNBIASED VERSION
     """
     # Set random seeds if provided
     if seed is not None:
@@ -165,8 +134,8 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
     convergence_history = []
 
     # Log(D) bounds for monitoring
-    log_D_min_monitor = -20.0
-    log_D_max_monitor = -2.0
+    log_D_min_monitor = -25.0
+    log_D_max_monitor = -1.0
 
     print(f"\nStarting deterministic training with logarithmic D parameterization for {epochs} epochs")
     print(f"Phase breakdown: {[phase['epochs'] for phase in phase_configs]} epochs")
@@ -216,8 +185,8 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                         tf.reduce_sum(tf.square(w)) for w in pinn.weights
                     )
 
-                    # Enhanced log(D) regularization
-                    log_d_reg = compute_enhanced_log_d_regularization(pinn)
+                    # UNBIASED: Remove all log(D) regularization that creates bias
+                    log_d_reg = tf.constant(0.0, dtype=tf.float32)
 
                     # Total loss calculation
                     total_loss = (
@@ -230,7 +199,7 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                     losses['total'] = total_loss
                     losses['interior'] = interior_loss
                     losses['l2_reg'] = l2_loss
-                    losses['log_d_reg_enhanced'] = log_d_reg
+                    losses['log_d_reg_unbiased'] = log_d_reg
 
                 # Apply gradients with consistent clipping
                 trainable_vars = pinn.get_trainable_variables()
@@ -445,11 +414,8 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
                         tf.reduce_sum(tf.square(w)) for w in pinn.weights
                     )
 
-                    # Diffusion coefficient regularization
-                    d_target = tf.constant(0.0001, dtype=tf.float32)
-                    d_reg = 0.01 * tf.square(
-                        tf.math.log(pinn.D + 1e-8) - tf.math.log(d_target)
-                    )
+                    # UNBIASED: Remove diffusion coefficient bias regularization
+                    d_reg = tf.constant(0.0, dtype=tf.float32)
 
                     # Total loss calculation
                     total_loss = (
