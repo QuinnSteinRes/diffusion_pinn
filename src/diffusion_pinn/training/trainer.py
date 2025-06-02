@@ -63,8 +63,10 @@ def create_and_initialize_pinn(inputfile: str,
 
     return pinn, training_data
 
+# Replace the debug_data_distribution function in your trainer.py with this version:
+
 def debug_data_distribution(data: Dict[str, tf.Tensor]):
-    """Debug function to check data distribution"""
+    """Debug function to check data distribution - NO UNICODE CHARACTERS"""
     print("\n=== DATA DISTRIBUTION DEBUG ===")
 
     x_u_train = data['X_u_train'].numpy()
@@ -86,11 +88,11 @@ def debug_data_distribution(data: Dict[str, tf.Tensor]):
     print(f"  y: [{x_i_train[:, 1].min():.4f}, {x_i_train[:, 1].max():.4f}]")
     print(f"  t: [{x_i_train[:, 2].min():.4f}, {x_i_train[:, 2].max():.4f}]")
 
-    # Check for time = 0 points (initial conditions)
+    # Check for time = 0 points (initial conditions) - FIXED: NO UNICODE
     t_zero_boundary = np.sum(np.abs(x_u_train[:, 2]) < 1e-6)
     t_zero_interior = np.sum(np.abs(x_i_train[:, 2]) < 1e-6)
 
-    print(f"\nInitial condition points (t≈0):")
+    print(f"\nInitial condition points (t=0):")
     print(f"  In boundary data: {t_zero_boundary}")
     print(f"  In interior data: {t_zero_interior}")
 
@@ -107,6 +109,13 @@ def debug_data_distribution(data: Dict[str, tf.Tensor]):
 
     print(f"\nSpatial boundary points:")
     print(f"  In boundary data: {np.sum(boundary_points)}")
+
+    # Check time distribution
+    print(f"\nTime distribution in boundary data:")
+    unique_times = np.unique(x_u_train[:, 2])
+    for t_val in unique_times:
+        count = np.sum(np.abs(x_u_train[:, 2] - t_val) < 1e-6)
+        print(f"  t={t_val:.3f}: {count} points")
 
     print("=== END DEBUG ===\n")
 
