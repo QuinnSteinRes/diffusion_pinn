@@ -398,7 +398,7 @@ class DiffusionPINN(tf.Module):
         # Prevent extreme jumps in log(D)
         # Keep log(D) relatively stable during training
         log_D_target = -9.2  # Corresponds to D ≈ 1e-4, reasonable middle value
-        log_d_reg_losses['log_d_reg_stability'] = 0.0001 * tf.square(self.log_D - log_D_target)
+        # log_d_reg_losses['log_d_reg_stability'] = 0.0001 * tf.square(self.log_D - log_D_target)
 
         return log_d_reg_losses
 

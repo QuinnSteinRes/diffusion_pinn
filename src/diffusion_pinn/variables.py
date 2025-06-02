@@ -9,7 +9,7 @@ PINN_VARIABLES = {
     'random_seed': 42,                      # For reproducibility
 
     # Diffusion coefficient
-    'initial_D': 0.001,                    # Reasonable starting point
+    'initial_D': 0.0005,                    # Reasonable starting point
 
     # Sampling points
     'N_u': 1000,    # Boundary points

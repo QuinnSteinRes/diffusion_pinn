@@ -95,9 +95,9 @@ def compute_enhanced_log_d_regularization(pinn):
     reg_terms = []
 
     # 1. Keep log(D) in reasonable range for typical diffusion problems
-    log_D_target = -9.2  # Corresponds to D ≈ 1e-4
-    target_penalty = 0.0001 * tf.square(current_log_D - log_D_target)
-    reg_terms.append(target_penalty)
+    # log_D_target = -9.2  # Corresponds to D ≈ 1e-4
+    # target_penalty = 0.0001 * tf.square(current_log_D - log_D_target)
+    # reg_terms.append(target_penalty)
 
     # 2. Soft bounds penalty
     log_D_min = -18.0
@@ -470,13 +470,6 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
                 # Gradient clipping
                 gradients, global_norm = tf.clip_by_global_norm(gradients, 1.0)
                 optimizer.apply_gradients(zip(gradients, trainable_vars))
-
-                # Bounds enforcement on diffusion coefficient
-                if pinn.config.diffusion_trainable:
-                    D_value = pinn.D.numpy()
-                    if D_value < D_min or D_value > D_max:
-                        constrained_D = np.clip(D_value, D_min, D_max)
-                        pinn.D.assign(constrained_D)
 
                 # Record history
                 current_D = pinn.get_diffusion_coefficient()
