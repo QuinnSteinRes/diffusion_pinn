@@ -163,7 +163,6 @@ def compute_stable_interior_loss(pinn, x_interior, c_interior):
     # Combine for final loss
     loss_value = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
 
-    print(f"Interior loss computed: {loss_value:.6f} for {x_interior.shape[0]} points")
     return loss_value
 
 def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
