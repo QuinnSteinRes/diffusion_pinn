@@ -388,7 +388,26 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                 log_D_history.append(current_log_D)
                 loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
-                # Enhanced convergence checking for log(D)
+                # ENHANCED LOSS MONITORING - Report every 10 epochs for debugging
+                if epoch_counter % 10 == 0:
+                    print(f"\nEpoch {epoch_counter:5d}: D={current_D:.6e}, log(D)={current_log_D:.6f}")
+                    print(f"  Total Loss={losses['total']:.6f}, LR={current_lr:.2e}")
+                    print(f"  Initial={losses['initial']:.6f} (IC points: {tf.reduce_sum(tf.cast(ic_mask, tf.int32))})")
+                    print(f"  Boundary={losses['boundary']:.6f} (BC points: {tf.reduce_sum(tf.cast(bc_mask, tf.int32))})")
+                    print(f"  Interior={losses['interior']:.6f}")
+                    print(f"  Physics={losses['physics']:.6f}")
+
+                    # Additional diagnostics for flat losses
+                    if epoch_counter > 100 and len(loss_history) >= 100:
+                        initial_change = abs(losses['initial'] - loss_history[-100]['initial'])
+                        boundary_change = abs(losses['boundary'] - loss_history[-100]['boundary'])
+                        print(f"  Loss changes (last 100 epochs): Initial={initial_change:.8f}, Boundary={boundary_change:.8f}")
+
+                        if initial_change < 1e-8:
+                            print(f"  WARNING: Initial loss not changing!")
+                        if boundary_change < 1e-8:
+                            print(f"  WARNING: Boundary loss not changing!")
+
                 if epoch_counter % 100 == 0:
                     # Check convergence over last 50 epochs using log(D)
                     if len(log_D_history) >= 50:
@@ -399,10 +418,6 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
                         convergence_metric = log_d_std
                         convergence_history.append(convergence_metric)
 
-                        print(f"Epoch {epoch_counter:5d}: D={current_D:.6e}, log(D)={current_log_D:.6f}")
-                        print(f"  Total Loss={losses['total']:.6f}, LR={current_lr:.2e}")
-                        print(f"  Initial={losses['initial']:.6f}, Boundary={losses['boundary']:.6f}")
-                        print(f"  Interior={losses['interior']:.6f}, Physics={losses['physics']:.6f}")
                         print(f"  log(D)_std={convergence_metric:.6f}")
 
                         # Convergence criteria
