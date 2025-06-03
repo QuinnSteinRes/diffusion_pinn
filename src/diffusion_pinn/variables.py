@@ -14,13 +14,13 @@ PINN_VARIABLES = {
     # Sampling points
     'N_u': 1500,    # Boundary points
     'N_f': 20000,   # Physics points (PDE)
-    'N_i': 15000,    # Interior data points
+    'N_i': 15000,   # Interior data points
 
-    # Loss weights - balanced for stability
+    # FIXED Loss weights - prioritize data learning first
     'loss_weights': {
-        'initial': 1.0,
-        'boundary': 1.0,
-        'interior': 3.0,
-        'physics': 5.0
+        'initial': 5.0,     # Increased from 1.0
+        'boundary': 5.0,    # Increased from 1.0
+        'interior': 10.0,   # Increased from 3.0
+        'physics': 1.0      # Decreased from 5.0
     }
 }
