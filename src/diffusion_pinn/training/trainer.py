@@ -242,11 +242,11 @@ def train_pinn(pinn: 'DiffusionPINN',
                     issues_found.append("D not changing at all")
 
                 if issues_found:
-                    print(f"    🚨 ISSUES: {', '.join(issues_found)}")
+                    print(f"     ISSUES: {', '.join(issues_found)}")
 
                     # EMERGENCY DIAGNOSTIC
                     if epoch == 100 and abs(current_D - initial_D) < 1e-12:
-                        print(f"\n🚨 EMERGENCY DIAGNOSTIC at epoch {epoch}:")
+                        print(f"\n EMERGENCY DIAGNOSTIC at epoch {epoch}:")
                         print(f"    log_D variable: {log_d_var}")
                         print(f"    log_D trainable: {log_d_var.trainable if log_d_var else 'N/A'}")
                         print(f"    Total trainable vars: {len(trainable_vars)}")
@@ -263,11 +263,11 @@ def train_pinn(pinn: 'DiffusionPINN',
                         except Exception as e:
                             print(f"    Manual gradient test failed: {e}")
                 else:
-                    print(f"    ✅ All checks passed")
+                    print(f"    All checks passed")
 
                 # Check for extreme values
                 if current_D < D_min * 10 or current_D > D_max / 10:
-                    print(f"    ⚠️  D approaching bounds!")
+                    print(f"    D approaching bounds!")
 
         print(f"\nPhase 1 completed - Final D: {D_history[-1]:.8e}")
         print(f"D change from start: {abs(D_history[-1] - D_history[0]):.8e}")
