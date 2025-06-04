@@ -1,51 +1,44 @@
 #!/bin/bash
+# Simplified multiCase.sh for seed robustness testing
 
-# Add basic error handling
 set -e
 
-# Working directory
 WORKDIR=$PWD
+SEED_LIST=(42 55 71 89 107 127 149 173 199 227)
+NUM_RUNS=${1:-10}
 
-# cases=(1 2 3 4 5 6 7 8 9 10)
+echo "Starting test - $NUM_RUNS runs"
 
-# Array of case numbers
-cases=(1)
+if [ ! -d "$WORKDIR/defaultScripts" ]; then
+    echo "Error: defaultScripts directory not found!"
+    exit 1
+fi
 
-# Check if we're in the correct directory
-echo "Starting multi-case submission"
-echo "Working directory: $WORKDIR"
-
-for casei in "${cases[@]}"
+for i in $(seq 1 $NUM_RUNS)
 do
-    echo "Processing: run_$casei"
+    SEED=${SEED_LIST[$((i-1))]}
 
-    # Verify directory exists
-    if [ ! -d "run_$casei" ]; then
-        echo "Creating directory run_$casei"
-        cp -r $WORKDIR/defaultScripts run_$casei
+    echo "Processing run_$i with seed $SEED"
+
+    if [ ! -d "run_$i" ]; then
+        cp -r $WORKDIR/defaultScripts run_$i
     fi
 
-    cd "run_$casei"
+    cd "run_$i"
 
-    # Update the case name in runCase.sh without changing the seed
-    sed -i "s/CHARCASE/caseX_${casei}/g" runCase.sh
+    # Set job name and seed
+    sed -i "s/CHARCASE/cmap_sml_${i}_s${SEED}/g" runCase.sh
 
-    # Remove any existing seed parameter to use the default from variables.py
     if grep -q "\-\-seed" runCase.sh; then
-        # Remove the seed parameter entirely
-        sed -i "s/--seed [0-9]*//g" runCase.sh
+        sed -i "s/--seed [0-9]*/--seed $SEED/g" runCase.sh
+    else
+        sed -i "s/python pinn_trainer\.py/python pinn_trainer.py --seed $SEED/g" runCase.sh
     fi
 
-    echo "Using default seed from variables.py for run_$casei"
-
-    # Submit job
-    echo "Submitting job for run_$casei"
+    echo "  Submitting job for run_$i (seed $SEED)"
     qsub runCase.sh
-
     cd "$WORKDIR"
-
-    # Add small delay between submissions
     sleep 1
 done
 
-echo "All jobs submitted"
+echo "All $NUM_RUNS jobs submitted with seeds: ${SEED_LIST[@]:0:$NUM_RUNS}"
