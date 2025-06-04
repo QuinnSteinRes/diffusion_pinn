@@ -6,11 +6,11 @@ from typing import Dict, Tuple
 import gc
 
 class DiffusionDataProcessor:
-    """Data processor for diffusion PINN model"""
+    """Data processor for diffusion PINN model - HYBRID approach"""
 
     def __init__(self, inputfile: str, normalize_spatial: bool = True, seed: int = None):
         """
-        Initialize data processor
+        Initialize data processor - HYBRID: Keep V0.2.22's improvements but fix classification
 
         Args:
             inputfile: Path to CSV file containing x, y, t, intensity data
@@ -22,7 +22,7 @@ class DiffusionDataProcessor:
             np.random.seed(seed)
 
         try:
-            # Read data in chunks to reduce memory usage
+            # Read data efficiently
             data = np.genfromtxt(inputfile, delimiter=',', skip_header=1, dtype=float)
 
             # Extract columns and immediately delete original data
@@ -38,6 +38,11 @@ class DiffusionDataProcessor:
             self.y_raw = np.sort(np.unique(y_data))
             self.t = np.sort(np.unique(t_data))
 
+            print(f"Raw data ranges:")
+            print(f"  x: [{self.x_raw.min():.6f}, {self.x_raw.max():.6f}] ({len(self.x_raw)} points)")
+            print(f"  y: [{self.y_raw.min():.6f}, {self.y_raw.max():.6f}] ({len(self.y_raw)} points)")
+            print(f"  t: [{self.t.min():.6f}, {self.t.max():.6f}] ({len(self.t)} points)")
+
             # Normalize spatial coordinates if requested
             if normalize_spatial:
                 x_min, x_max = self.x_raw.min(), self.x_raw.max()
@@ -52,6 +57,10 @@ class DiffusionDataProcessor:
 
                 del x_data, y_data
                 gc.collect()
+
+                print(f"Normalized spatial coordinates to [0,1]")
+                print(f"  x_norm: [{self.x.min():.6f}, {self.x.max():.6f}]")
+                print(f"  y_norm: [{self.y.min():.6f}, {self.y.max():.6f}]")
             else:
                 self.x = self.x_raw
                 self.y = self.y_raw
@@ -62,13 +71,15 @@ class DiffusionDataProcessor:
             nx, ny, nt = len(self.x), len(self.y), len(self.t)
             self.usol = np.zeros((nx, ny, nt))
 
+            print(f"Creating solution array: {nx} x {ny} x {nt} = {nx*ny*nt} points")
+
             # Create mapping dictionaries for faster lookup
             x_indices = {val: idx for idx, val in enumerate(self.x)}
             y_indices = {val: idx for idx, val in enumerate(self.y)}
             t_indices = {val: idx for idx, val in enumerate(self.t)}
 
             # Fill the 3D array in batches
-            batch_size = 1000
+            batch_size = 10000
             for start_idx in range(0, len(t_data), batch_size):
                 end_idx = min(start_idx + batch_size, len(t_data))
                 batch_slice = slice(start_idx, end_idx)
@@ -92,17 +103,26 @@ class DiffusionDataProcessor:
             # Create meshgrid
             self.X, self.Y, self.T = np.meshgrid(self.x, self.y, self.t, indexing='ij')
 
-            # Get domain bounds
+            # Get domain bounds - CRITICAL FIX: Use actual coordinate bounds
             self.X_u_test = np.hstack((
                 self.X.flatten()[:,None],
                 self.Y.flatten()[:,None],
                 self.T.flatten()[:,None]
             ))
-            self.lb = self.X_u_test[0]
-            self.ub = self.X_u_test[-1]
+
+            # FIXED: Use proper bounds
+            self.lb = np.array([self.x.min(), self.y.min(), self.t.min()])
+            self.ub = np.array([self.x.max(), self.y.max(), self.t.max()])
+
+            print(f"Domain bounds:")
+            print(f"  Lower: [{self.lb[0]:.6f}, {self.lb[1]:.6f}, {self.lb[2]:.6f}]")
+            print(f"  Upper: [{self.ub[0]:.6f}, {self.ub[1]:.6f}, {self.ub[2]:.6f}]")
 
             # Flatten solution
             self.u = self.usol.flatten('F')[:,None]
+
+            print(f"Data processing completed successfully")
+            print(f"Solution range: [{self.u.min():.6f}, {self.u.max():.6f}]")
 
         except Exception as e:
             print(f"Error in data processing: {str(e)}")
@@ -112,78 +132,72 @@ class DiffusionDataProcessor:
 
     def get_boundary_and_interior_points(self) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Extract boundary and interior points with their values
-
-        Returns:
-            Tuple of (coordinates array, values array)
+        Extract boundary and interior points with their values - HYBRID: Simplified but robust
         """
         try:
-            coords_list = []
-            values_list = []
+            all_coords = []
+            all_values = []
 
-            # Process in batches to manage memory
-            batch_size = max(1, len(self.t) // 4)  # Process 25% of time steps at once
+            # Process each time step
+            for t_idx, t_val in enumerate(self.t):
+                # Boundary points for this time step
+                # X boundaries (x=0 and x=1)
+                for x_boundary_idx in [0, -1]:  # First and last x indices
+                    x_boundary_coords = np.column_stack([
+                        np.full(len(self.y), self.x[x_boundary_idx]),
+                        self.y,
+                        np.full(len(self.y), t_val)
+                    ])
+                    x_boundary_values = self.usol[x_boundary_idx, :, t_idx].reshape(-1, 1)
 
-            for t_start in range(0, len(self.t), batch_size):
-                t_end = min(t_start + batch_size, len(self.t))
-                batch_coords = []
-                batch_values = []
+                    all_coords.append(x_boundary_coords)
+                    all_values.append(x_boundary_values)
 
-                for t_idx in range(t_start, t_end):
-                    # X boundaries
-                    x_min_coords = np.hstack((
-                        self.X[0,:,t_idx].flatten()[:,None],
-                        self.Y[0,:,t_idx].flatten()[:,None],
-                        np.ones_like(self.X[0,:,t_idx].flatten()[:,None]) * self.t[t_idx]
-                    ))
-                    x_max_coords = np.hstack((
-                        self.X[-1,:,t_idx].flatten()[:,None],
-                        self.Y[-1,:,t_idx].flatten()[:,None],
-                        np.ones_like(self.X[-1,:,t_idx].flatten()[:,None]) * self.t[t_idx]
-                    ))
+                # Y boundaries (y=0 and y=1)
+                for y_boundary_idx in [0, -1]:  # First and last y indices
+                    y_boundary_coords = np.column_stack([
+                        self.x,
+                        np.full(len(self.x), self.y[y_boundary_idx]),
+                        np.full(len(self.x), t_val)
+                    ])
+                    y_boundary_values = self.usol[:, y_boundary_idx, t_idx].reshape(-1, 1)
 
-                    # Y boundaries
-                    y_min_coords = np.hstack((
-                        self.X[:,0,t_idx].flatten()[:,None],
-                        self.Y[:,0,t_idx].flatten()[:,None],
-                        np.ones_like(self.X[:,0,t_idx].flatten()[:,None]) * self.t[t_idx]
-                    ))
-                    y_max_coords = np.hstack((
-                        self.X[:,-1,t_idx].flatten()[:,None],
-                        self.Y[:,-1,t_idx].flatten()[:,None],
-                        np.ones_like(self.X[:,-1,t_idx].flatten()[:,None]) * self.t[t_idx]
-                    ))
+                    all_coords.append(y_boundary_coords)
+                    all_values.append(y_boundary_values)
 
-                    # Interior points
-                    interior_x = self.X[1:-1,1:-1,t_idx].flatten()[:,None]
-                    interior_y = self.Y[1:-1,1:-1,t_idx].flatten()[:,None]
-                    interior_t = np.ones_like(interior_x) * self.t[t_idx]
-                    interior_coords = np.hstack((interior_x, interior_y, interior_t))
+                # Interior points for this time step (exclude boundaries)
+                if len(self.x) > 2 and len(self.y) > 2:  # Only if we have interior points
+                    interior_x_indices = range(1, len(self.x) - 1)
+                    interior_y_indices = range(1, len(self.y) - 1)
 
-                    # Get corresponding values
-                    x_min_values = self.usol[0,:,t_idx].flatten()[:,None]
-                    x_max_values = self.usol[-1,:,t_idx].flatten()[:,None]
-                    y_min_values = self.usol[:,0,t_idx].flatten()[:,None]
-                    y_max_values = self.usol[:,-1,t_idx].flatten()[:,None]
-                    interior_values = self.usol[1:-1,1:-1,t_idx].flatten()[:,None]
+                    interior_coords_list = []
+                    interior_values_list = []
 
-                    # Append to batch lists
-                    batch_coords.extend([x_min_coords, x_max_coords, y_min_coords, y_max_coords, interior_coords])
-                    batch_values.extend([x_min_values, x_max_values, y_min_values, y_max_values, interior_values])
+                    for x_idx in interior_x_indices:
+                        for y_idx in interior_y_indices:
+                            interior_coords_list.append([self.x[x_idx], self.y[y_idx], t_val])
+                            interior_values_list.append(self.usol[x_idx, y_idx, t_idx])
 
-                # Stack batch results
-                coords_list.append(np.vstack(batch_coords))
-                values_list.append(np.vstack(batch_values))
+                    if interior_coords_list:  # Only add if we have interior points
+                        interior_coords = np.array(interior_coords_list)
+                        interior_values = np.array(interior_values_list).reshape(-1, 1)
 
-                # Clean up batch data
-                del batch_coords, batch_values
-                gc.collect()
+                        all_coords.append(interior_coords)
+                        all_values.append(interior_values)
 
-            # Combine all batches
-            all_coords = np.vstack(coords_list)
-            all_values = np.vstack(values_list)
+            # Combine all coordinates and values
+            final_coords = np.vstack(all_coords)
+            final_values = np.vstack(all_values)
 
-            return all_coords, all_values
+            print(f"Extracted {len(final_coords)} boundary and interior points")
+
+            # Verify coordinate ranges
+            print(f"Point coordinate ranges:")
+            print(f"  x: [{final_coords[:, 0].min():.6f}, {final_coords[:, 0].max():.6f}]")
+            print(f"  y: [{final_coords[:, 1].min():.6f}, {final_coords[:, 1].max():.6f}]")
+            print(f"  t: [{final_coords[:, 2].min():.6f}, {final_coords[:, 2].max():.6f}]")
+
+            return final_coords, final_values
 
         except Exception as e:
             print(f"Error in boundary and interior point extraction: {str(e)}")
@@ -193,113 +207,50 @@ class DiffusionDataProcessor:
 
     def create_deterministic_collocation_points(self, N_f: int, seed: int = None) -> np.ndarray:
         """
-        Create deterministic collocation points using quasi-random sequences
-        This replaces random Latin Hypercube Sampling with more deterministic Sobol sequences
-
-        Args:
-            N_f: Number of collocation points to generate
-            seed: Random seed for reproducibility
-
-        Returns:
-            Array of collocation points with shape (N_f, 3) for [x, y, t]
+        Create deterministic collocation points - Keep V0.2.22's approach but simpler
         """
         if seed is not None:
             np.random.seed(seed)
 
-        print(f"Generating {N_f} deterministic collocation points using Sobol sequences...")
+        print(f"Generating {N_f} deterministic collocation points...")
 
         try:
-            # Use Sobol sequences for more uniform and deterministic coverage
-            from scipy.stats import qmc
+            # Use scipy's Sobol sequences if available, otherwise fallback to LHS
+            try:
+                from scipy.stats import qmc
+                sampler = qmc.Sobol(d=3, scramble=False, seed=seed)
+                points = sampler.random(N_f)
+                print("Using Sobol quasi-random sequences")
+            except ImportError:
+                # Fallback to Latin Hypercube Sampling
+                points = lhs(3, samples=N_f, criterion='maximin', random_state=seed)
+                print("Using Latin Hypercube Sampling (fallback)")
 
-            # Create Sobol sampler - more deterministic than LHS
-            # scramble=False ensures reproducibility
-            sampler = qmc.Sobol(d=3, scramble=False, seed=seed)
-            points = sampler.random(N_f)
+            # Scale to domain bounds
+            x_min, x_max = self.x.min(), self.x.max()
+            y_min, y_max = self.y.min(), self.y.max()
+            t_min, t_max = self.t.min(), self.t.max()
 
-            print("Using Sobol quasi-random sequences for collocation points")
+            points[:, 0] = x_min + (x_max - x_min) * points[:, 0]  # x coordinates
+            points[:, 1] = y_min + (y_max - y_min) * points[:, 1]  # y coordinates
+            points[:, 2] = t_min + (t_max - t_min) * points[:, 2]  # t coordinates
 
-        except ImportError:
-            # Fallback to deterministic grid if scipy.stats.qmc not available
-            print("Warning: scipy.stats.qmc not available, using deterministic grid fallback")
-            points = self._create_deterministic_grid(N_f, seed)
+            print(f"Collocation points bounds:")
+            print(f"  x: [{points[:, 0].min():.6f}, {points[:, 0].max():.6f}]")
+            print(f"  y: [{points[:, 1].min():.6f}, {points[:, 1].max():.6f}]")
+            print(f"  t: [{points[:, 2].min():.6f}, {points[:, 2].max():.6f}]")
 
-        # Scale to domain bounds
-        x_min, x_max = self.x.min(), self.x.max()
-        y_min, y_max = self.y.min(), self.y.max()
-        t_min, t_max = self.t.min(), self.t.max()
+            return points
 
-        # Apply scaling deterministically
-        points[:, 0] = x_min + (x_max - x_min) * points[:, 0]  # x coordinates
-        points[:, 1] = y_min + (y_max - y_min) * points[:, 1]  # y coordinates
-        points[:, 2] = t_min + (t_max - t_min) * points[:, 2]  # t coordinates
-
-        print(f"Collocation points bounds: x=[{x_min:.4f}, {x_max:.4f}], "
-              f"y=[{y_min:.4f}, {y_max:.4f}], t=[{t_min:.4f}, {t_max:.4f}]")
-
-        return points
-
-    def _create_deterministic_grid(self, N_f: int, seed: int = None) -> np.ndarray:
-        """
-        Fallback method to create deterministic grid points when Sobol sequences unavailable
-
-        Args:
-            N_f: Number of points to generate
-            seed: Random seed for reproducibility
-
-        Returns:
-            Array of grid points with shape (N_f, 3) for [x, y, t]
-        """
-        print("Creating deterministic grid as fallback...")
-
-        # Create a deterministic grid
-        n_per_dim = int(np.ceil(N_f ** (1/3)))
-
-        # Create regular grid points in [0,1]^3
-        x_grid = np.linspace(0, 1, n_per_dim)
-        y_grid = np.linspace(0, 1, n_per_dim)
-        t_grid = np.linspace(0, 1, n_per_dim)
-
-        # Create meshgrid and flatten
-        X_grid, Y_grid, T_grid = np.meshgrid(x_grid, y_grid, t_grid, indexing='ij')
-        points = np.column_stack([
-            X_grid.flatten(),
-            Y_grid.flatten(),
-            T_grid.flatten()
-        ])
-
-        # If we have more points than needed, take first N_f deterministically
-        if len(points) > N_f:
-            # Use deterministic sampling based on seed
-            if seed is not None:
-                np.random.seed(seed)
-            indices = np.random.choice(len(points), N_f, replace=False)
-            indices.sort()  # Keep deterministic order
-            points = points[indices]
-        elif len(points) < N_f:
-            # If we need more points, replicate deterministically
-            n_repeats = (N_f // len(points)) + 1
-            points = np.tile(points, (n_repeats, 1))[:N_f]
-
-        print(f"Generated {len(points)} grid points")
-        return points
+        except Exception as e:
+            print(f"Error creating collocation points: {str(e)}")
+            raise
 
     def prepare_training_data(self, N_u: int, N_f: int, N_i: int,
                             temporal_density: int = 10, seed: int = None) -> Dict[str, tf.Tensor]:
         """
-        Prepare training data for the PINN with deterministic collocation points
-
-        Args:
-            N_u: Number of boundary points
-            N_f: Number of collocation points
-            N_i: Number of interior points with direct supervision
-            temporal_density: Number of time points to generate between each frame (DEPRECATED)
-            seed: Random seed for reproducibility
-
-        Returns:
-            Dictionary containing training data tensors
+        Prepare training data - HYBRID: V0.2.22's structure but with fixed classification
         """
-        # Set random seed if provided
         if seed is not None:
             np.random.seed(seed)
 
@@ -309,56 +260,95 @@ class DiffusionDataProcessor:
             # Get boundary and interior points
             all_coords, all_values = self.get_boundary_and_interior_points()
 
-            # Separate boundary and interior points
-            t = all_coords[:, 2]
-            x = all_coords[:, 0]
-            y = all_coords[:, 1]
+            # CRITICAL FIX: Better point classification using exact coordinate matching
+            x_coords = all_coords[:, 0]
+            y_coords = all_coords[:, 1]
+            t_coords = all_coords[:, 2]
 
-            # Create masks for different types of points
-            boundary_mask = np.logical_or.reduce([
-                np.abs(x - self.x.min()) < 1e-6,
-                np.abs(x - self.x.max()) < 1e-6,
-                np.abs(y - self.y.min()) < 1e-6,
-                np.abs(y - self.y.max()) < 1e-6
-            ])
+            # Create masks for different types of points with tight tolerances
+            tol = 1e-10  # Very tight tolerance for exact matching
 
-            interior_mask = ~boundary_mask
+            # Initial condition mask (t = t_min)
+            ic_mask = np.abs(t_coords - self.t.min()) < tol
 
-            # Count true values in masks
+            # Boundary condition masks (x = x_min/max or y = y_min/max, but not at t_min)
+            x_boundary_mask = np.logical_or(
+                np.abs(x_coords - self.x.min()) < tol,
+                np.abs(x_coords - self.x.max()) < tol
+            )
+            y_boundary_mask = np.logical_or(
+                np.abs(y_coords - self.y.min()) < tol,
+                np.abs(y_coords - self.y.max()) < tol
+            )
+            spatial_boundary_mask = np.logical_or(x_boundary_mask, y_boundary_mask)
+
+            # Boundary points are spatial boundaries that are NOT initial conditions
+            boundary_mask = np.logical_and(spatial_boundary_mask, ~ic_mask)
+
+            # Interior points are neither boundaries nor initial conditions
+            interior_mask = np.logical_and(~spatial_boundary_mask, ~ic_mask)
+
+            # Count points for verification
+            n_ic = np.sum(ic_mask)
             n_boundary = np.sum(boundary_mask)
             n_interior = np.sum(interior_mask)
 
-            print(f"Available boundary points: {n_boundary}, interior points: {n_interior}")
+            print(f"Point classification:")
+            print(f"  Initial condition points: {n_ic}")
+            print(f"  Boundary condition points: {n_boundary}")
+            print(f"  Interior points: {n_interior}")
+            print(f"  Total classified: {n_ic + n_boundary + n_interior} / {len(all_coords)}")
 
-            # Deterministic sampling using seed
+            # Sample points deterministically
             if seed is not None:
                 np.random.seed(seed)
 
-            boundary_indices = np.random.choice(np.where(boundary_mask)[0], min(N_u, n_boundary),
-                                            replace=(N_u > n_boundary))
-            interior_indices = np.random.choice(np.where(interior_mask)[0], min(N_i, n_interior),
-                                            replace=(N_i > n_interior))
+            # Sample boundary + initial points
+            combined_mask = np.logical_or(ic_mask, boundary_mask)
+            combined_indices = np.where(combined_mask)[0]
+            if len(combined_indices) > N_u:
+                boundary_indices = np.random.choice(combined_indices, N_u, replace=False)
+                boundary_indices.sort()  # Keep deterministic order
+            else:
+                boundary_indices = combined_indices
 
-            # Sort indices for deterministic order
-            boundary_indices.sort()
-            interior_indices.sort()
+            # Sample interior points
+            interior_indices = np.where(interior_mask)[0]
+            if len(interior_indices) > N_i:
+                selected_interior_indices = np.random.choice(interior_indices, N_i, replace=False)
+                selected_interior_indices.sort()  # Keep deterministic order
+            else:
+                selected_interior_indices = interior_indices
 
             X_u_train = all_coords[boundary_indices]
             u_train = all_values[boundary_indices]
 
-            X_i_train = all_coords[interior_indices]
-            u_i_train = all_values[interior_indices]
+            X_i_train = all_coords[selected_interior_indices]
+            u_i_train = all_values[selected_interior_indices]
 
-            print(f"Selected {len(X_u_train)} boundary points, {len(X_i_train)} interior points")
+            print(f"Selected {len(X_u_train)} boundary/initial points, {len(X_i_train)} interior points")
 
-            # UPDATED: Use deterministic collocation point generation
+            # VERIFICATION: Check that we have initial condition points
+            t_check = X_u_train[:, 2]
+            ic_count_in_training = np.sum(np.abs(t_check - self.t.min()) < tol)
+            print(f"VERIFICATION: Training data contains {ic_count_in_training} initial condition points")
+
+            if ic_count_in_training == 0:
+                print("ERROR: No initial condition points in training data!")
+                # Force include some initial condition points
+                ic_indices = np.where(ic_mask)[0]
+                if len(ic_indices) > 0:
+                    # Add the first few IC points to boundary training data
+                    n_ic_to_add = min(len(ic_indices), N_u // 4)  # Add up to 25% as IC points
+                    ic_to_add = ic_indices[:n_ic_to_add]
+
+                    X_u_train = np.vstack([X_u_train, all_coords[ic_to_add]])
+                    u_train = np.vstack([u_train, all_values[ic_to_add]])
+
+                    print(f"FIXED: Added {n_ic_to_add} initial condition points to training data")
+
+            # Generate collocation points
             X_f_train = self.create_deterministic_collocation_points(N_f, seed=seed)
-
-            # Add boundary and interior points to collocation points for PDE training
-            print(f"Adding boundary and interior points to collocation set...")
-            X_f_train = np.vstack((X_f_train, X_u_train, X_i_train))
-
-            print(f"Total collocation points (including boundary/interior): {len(X_f_train)}")
 
             # Convert to TensorFlow tensors
             training_data = {
@@ -372,7 +362,10 @@ class DiffusionDataProcessor:
             }
 
             print("Training data preparation completed successfully")
-            print(f"Data shapes: X_u_train={X_u_train.shape}, X_i_train={X_i_train.shape}, X_f_train={X_f_train.shape}")
+            print(f"Final data shapes:")
+            print(f"  X_u_train: {X_u_train.shape}")
+            print(f"  X_i_train: {X_i_train.shape}")
+            print(f"  X_f_train: {X_f_train.shape}")
 
             return training_data
 
@@ -387,9 +380,6 @@ class DiffusionDataProcessor:
     def get_domain_info(self) -> Dict[str, Dict[str, Tuple[float, float]]]:
         """
         Get domain information for PINN initialization
-
-        Returns:
-            Dictionary containing spatial and temporal bounds
         """
         return {
             'spatial_bounds': {

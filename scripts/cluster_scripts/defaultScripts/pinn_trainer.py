@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Improved pinn_trainer.py with memory management and stability fixes
+# Hybrid pinn_trainer.py combining V0.2.14 stability with V0.2.22 improvements
 
 import os
 import sys
@@ -15,7 +15,7 @@ import pandas as pd
 import tensorflow as tf
 import matplotlib
 
-# Configure TensorFlow to grow GPU memory allocation (if available)
+# Configure TensorFlow for optimal performance
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
     try:
@@ -24,19 +24,18 @@ if gpus:
     except RuntimeError as e:
         print(f"Error configuring GPUs: {e}")
 
-# Configure CPU threading limits to avoid resource contention
 tf.config.threading.set_inter_op_parallelism_threads(2)
 tf.config.threading.set_intra_op_parallelism_threads(2)
 
-# When running without a display, use non-interactive backend
+# Use non-interactive backend when no display
 if not sys.stdout.isatty():
     matplotlib.use('Agg')
 
-# Add the package to path if needed
+# Add package to path
 if os.path.exists('/state/partition1/home/qs8/projects/diffusion_pinn'):
     sys.path.append('/state/partition1/home/qs8/projects/diffusion_pinn')
 
-# Now import diffusion_pinn modules
+# Import diffusion_pinn modules
 print("Importing diffusion_pinn...")
 import diffusion_pinn
 from diffusion_pinn import DiffusionConfig
@@ -50,17 +49,15 @@ from diffusion_pinn.utils.visualization import (
 from diffusion_pinn.variables import PINN_VARIABLES
 
 print("diffusion_pinn location:", diffusion_pinn.__file__)
-print("train_pinn location:", train_pinn.__code__.co_filename)
 
-# Memory monitoring class for memory usage tracking
 class MemoryMonitor:
+    """Simple memory monitoring for debugging"""
     def __init__(self, log_file='memory_usage.log', interval=10):
         self.log_file = log_file
         self.interval = interval
         self.is_running = False
         self.monitor_thread = None
 
-        # Initialize log file
         with open(self.log_file, 'w') as f:
             f.write("timestamp,rss_mb,vms_mb,available_mb,system_percent\n")
 
@@ -68,31 +65,22 @@ class MemoryMonitor:
         process = psutil.Process(os.getpid())
         while self.is_running:
             try:
-                # Process memory
                 mem_info = process.memory_info()
-
-                # System memory
                 sys_mem = psutil.virtual_memory()
-
                 timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+
                 with open(self.log_file, 'a') as f:
                     f.write(f"{timestamp},{mem_info.rss/1024/1024:.2f},"
                            f"{mem_info.vms/1024/1024:.2f},"
                            f"{sys_mem.available/1024/1024:.2f},"
                            f"{sys_mem.percent}\n")
 
-                # If memory usage is high, log more details and force GC
                 if mem_info.rss > 10 * 1024 * 1024 * 1024:  # Over 10GB
                     gc.collect()
-                    with open(f"{self.log_file}.alert", 'a') as f:
-                        f.write(f"HIGH MEMORY ALERT: {timestamp} - "
-                               f"RSS: {mem_info.rss/1024/1024:.2f}MB\n")
 
                 time.sleep(self.interval)
             except Exception as e:
                 print(f"Memory monitoring error: {str(e)}")
-                with open(f"{self.log_file}.error", 'a') as f:
-                    f.write(f"Error: {str(e)}\n")
                 time.sleep(self.interval)
 
     def start(self):
@@ -109,8 +97,8 @@ class MemoryMonitor:
             self.monitor_thread.join(timeout=2)
             print("Memory monitoring stopped")
 
-# Setup signal handlers for better error reporting
 def setup_signal_handlers(log_file='crash_log.txt'):
+    """Setup signal handlers for debugging crashes"""
     def signal_handler(sig, frame):
         signal_name = signal.Signals(sig).name
         with open(log_file, 'a') as f:
@@ -118,28 +106,16 @@ def setup_signal_handlers(log_file='crash_log.txt'):
             f.write("Stack trace:\n")
             traceback.print_stack(frame, file=f)
 
-            # Log memory info
             process = psutil.Process(os.getpid())
             mem_info = process.memory_info()
             f.write(f"\nMemory: RSS={mem_info.rss/(1024*1024):.1f}MB, VMS={mem_info.vms/(1024*1024):.1f}MB\n")
 
-            # Log system memory
-            f.write("\nSystem memory:\n")
-            system_mem = psutil.virtual_memory()
-            f.write(f"Total: {system_mem.total/(1024*1024):.1f}MB, "
-                   f"Available: {system_mem.available/(1024*1024):.1f}MB, "
-                   f"Used: {system_mem.used/(1024*1024):.1f}MB, "
-                   f"Percent: {system_mem.percent}%\n")
-
-        # For SIGTERM and SIGINT, exit after logging
         if sig in (signal.SIGTERM, signal.SIGINT):
             sys.exit(0)
 
-    # Register signal handlers
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    # Can't catch SIGSEGV reliably in Python, but try anyway
     try:
         signal.signal(signal.SIGSEGV, signal_handler)
     except:
@@ -148,25 +124,20 @@ def setup_signal_handlers(log_file='crash_log.txt'):
     print(f"Signal handlers set up, logging to {log_file}")
 
 def preprocess_data(input_file):
-    """Preprocess the CSV data with known columns: x, y, t, intensity"""
+    """Preprocess the CSV data"""
     try:
         print(f"Preprocessing data file: {input_file}")
-        # Read using numpy
         data = np.genfromtxt(input_file, delimiter=',', names=True)
 
-        # Verify columns
         expected_columns = ['x', 'y', 't', 'intensity']
         if not all(col in data.dtype.names for col in expected_columns):
             raise ValueError(f"CSV must contain columns: {', '.join(expected_columns)}")
 
-        # Save temporary processed file
         temp_file = input_file.replace('.csv', '_processed.csv')
 
-        # Save header
         with open(temp_file, 'w') as f:
             f.write('x,y,t,intensity\n')
 
-        # Save data in batches to reduce memory usage
         batch_size = 20000
         total_rows = len(data)
 
@@ -180,7 +151,6 @@ def preprocess_data(input_file):
                            delimiter=',',
                            fmt='%.8f')
 
-            # Clean up batch to free memory
             del batch
             gc.collect()
 
@@ -193,12 +163,11 @@ def preprocess_data(input_file):
         raise
 
 def setup_directories(base_dir):
-    """Create and return directory paths for outputs"""
+    """Create output directories"""
     results_dir = os.path.join(base_dir, "results")
     save_dir = os.path.join(base_dir, "saved_models")
     log_dir = os.path.join(base_dir, "tensorboard_data")
 
-    # Create directories
     for dir_path in [results_dir, save_dir, log_dir]:
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -209,7 +178,6 @@ def setup_directories(base_dir):
 def save_summary(base_dir, D_final, loss_history, converged=False):
     """Save summary statistics"""
     try:
-        # Create summary dictionary
         total_losses = [loss.get('total', 0) for loss in loss_history]
 
         summary_data = {
@@ -222,11 +190,9 @@ def save_summary(base_dir, D_final, loss_history, converged=False):
             'total_epochs': [len(loss_history)]
         }
 
-        # Save to CSV
         summary_file = os.path.join(base_dir, "training_summary.csv")
         pd.DataFrame(summary_data).to_csv(summary_file, index=False)
 
-        # Also save as text for easier viewing
         with open(os.path.join(base_dir, "training_summary.txt"), 'w') as f:
             f.write("Training Summary\n")
             f.write("===============\n\n")
@@ -245,7 +211,7 @@ def save_summary(base_dir, D_final, loss_history, converged=False):
         print(f"Warning: Could not save summary statistics: {str(e)}")
         traceback.print_exc()
 
-def check_convergence(D_history, threshold=0.001, window=100):
+def check_convergence(D_history, threshold=0.01, window=100):
     """Check if diffusion coefficient has converged"""
     if len(D_history) < window:
         return False
@@ -254,85 +220,56 @@ def check_convergence(D_history, threshold=0.001, window=100):
     mean_value = np.mean(recent_values)
     std_value = np.std(recent_values)
 
-    # Converged if standard deviation is small relative to mean
-    is_converged = (std_value / mean_value < threshold)
+    is_converged = (std_value / mean_value < threshold) if mean_value > 0 else False
 
-    # Print convergence metrics
     print(f"Convergence check - Mean D: {mean_value:.6f}, Std Dev: {std_value:.6f}")
     print(f"Relative variation: {(std_value/mean_value):.6f} (threshold: {threshold})")
     print(f"Convergence status: {is_converged}")
 
     return is_converged
 
-def create_constrained_optimizer(learning_rate=1e-3, diffusion_min=1e-6, diffusion_max=1e-2):
-    """Create an optimizer that constrains the diffusion coefficient"""
-
-    # Custom optimizer wrapper to apply constraints after each update
-    class ConstrainedAdam(tf.keras.optimizers.Adam):
-        def __init__(self, pinn_model, **kwargs):
-            super().__init__(**kwargs)
-            self.pinn_model = pinn_model
-
-        def _resource_apply_dense(self, grad, var, apply_state=None):
-            # Apply the normal Adam update
-            result = super()._resource_apply_dense(grad, var, apply_state)
-
-            # Apply constraints on diffusion coefficient
-            if var.name == self.pinn_model.D.name:
-                value = tf.clip_by_value(var, diffusion_min, diffusion_max)
-                var.assign(value)
-
-            return result
-
-    return lambda pinn_model: ConstrainedAdam(
-        pinn_model,
-        learning_rate=learning_rate
-    )
-
 def main(args):
-    """Main training function with improved error handling and memory management"""
+    """Main training function with hybrid approach"""
     start_time = time.time()
     print("\n" + "="*50)
-    print(f"Starting PINN training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Starting HYBRID PINN training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Input file: {args.input_file}")
     print(f"Output directory: {args.output_dir}")
     print(f"Epochs: {args.epochs}")
     print(f"Random seed: {args.seed}")
     print("="*50 + "\n")
 
+    # Set random seeds
     if args.seed is not None:
         print(f"Setting random seeds to {args.seed}")
         tf.random.set_seed(args.seed)
         np.random.seed(args.seed)
     else:
-        # Use default seed from PINN_VARIABLES
         default_seed = PINN_VARIABLES['random_seed']
         print(f"Using default seed from variables.py: {default_seed}")
         tf.random.set_seed(default_seed)
         np.random.seed(default_seed)
+        args.seed = default_seed
 
-    # Set up signal handlers for crashes
+    # Set up signal handlers and memory monitoring
     setup_signal_handlers(os.path.join(args.output_dir, 'crash_log.txt'))
 
-    # Initialize memory monitor
     memory_monitor = MemoryMonitor(
         log_file=os.path.join(args.output_dir, 'memory_usage.log'),
-        interval=20  # Check every 20 seconds
+        interval=20
     )
     memory_monitor.start()
 
     try:
         # Setup directories
         results_dir, save_dir, log_dir = setup_directories(args.output_dir)
-
-        # Force garbage collection before starting
         gc.collect()
 
         # Preprocess the input data
         processed_file = preprocess_data(args.input_file)
 
-        # Create and initialize PINN
-        print("\nInitializing PINN model...")
+        # Create and initialize PINN with hybrid approach
+        print("\nInitializing HYBRID PINN model...")
         pinn, data = create_and_initialize_pinn(
             inputfile=processed_file,
             N_u=PINN_VARIABLES['N_u'],
@@ -342,30 +279,32 @@ def main(args):
             seed=args.seed
         )
 
-        # Create optimizer with learning rate decay
-        print("Creating optimizer with learning rate decay...")
+        print(f"PINN initialized with log(D) parameterization")
+        print(f"Initial D: {pinn.get_diffusion_coefficient():.8e}")
+        print(f"Initial log(D): {pinn.get_log_diffusion_coefficient():.6f}")
+
+        # Create optimizer
+        print("Creating optimizer...")
         optimizer = tf.keras.optimizers.Adam(
             learning_rate=PINN_VARIABLES['learning_rate']
         )
 
-        # Train the model
+        # Train the model using hybrid approach
         print("\n" + "="*50)
-        print(f"Starting training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Training for {args.epochs} epochs")
-        print(f"Initial D = {pinn.get_diffusion_coefficient():.6f}")
+        print(f"Starting HYBRID training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Training for {args.epochs} epochs using two-phase approach with log(D)")
         print("="*50 + "\n")
 
-        # Use a try-except block for training to catch any errors
         try:
             D_history, loss_history = train_pinn(
                 pinn=pinn,
                 data=data,
                 optimizer=optimizer,
                 epochs=args.epochs,
-                save_dir=str(save_dir)
+                save_dir=str(save_dir),
+                seed=args.seed
             )
 
-            # Check if training was successful
             if not D_history or not loss_history:
                 raise RuntimeError("Training failed - empty history")
 
@@ -373,7 +312,6 @@ def main(args):
             print(f"\nError during training: {str(e)}")
             traceback.print_exc()
 
-            # Try to salvage what we can
             if 'pinn' in locals() and hasattr(pinn, 'get_diffusion_coefficient'):
                 D_final = pinn.get_diffusion_coefficient()
                 print(f"Final diffusion coefficient: {D_final:.6f}")
@@ -381,37 +319,52 @@ def main(args):
 
             return 1
 
-        # Clean up training data to free memory
+        # Clean up training data
         del data
         gc.collect()
 
         # Check convergence
         final_D = pinn.get_diffusion_coefficient()
+        final_log_D = pinn.get_log_diffusion_coefficient()
         converged = check_convergence(D_history) if len(D_history) > 100 else False
 
         # Generate and save plots
         try:
             import matplotlib.pyplot as plt
 
+            print("Generating plots...")
+
             # Plot loss history
             plot_loss_history(loss_history, save_dir=results_dir)
-            #plt.savefig(os.path.join(plot_dir, 'loss_history.png'))
-            plt.close()
+            plt.close('all')
 
             # Plot diffusion coefficient convergence
             plot_diffusion_convergence(D_history, save_dir=results_dir)
-            #plt.savefig(os.path.join(plot_dir, 'd_convergence.png'))
-            plt.close()
+            plt.close('all')
 
-            # Plot solutions
-            data_processor = DiffusionDataProcessor(processed_file)
-            t_indices = [0, len(data_processor.t)//3, 2*len(data_processor.t)//3, -1]
+            # Plot solutions at different time points
+            print("Creating solution plots...")
+            data_processor = DiffusionDataProcessor(processed_file, seed=args.seed)
+
+            # Select time indices for plotting
+            n_times = len(data_processor.t)
+            if n_times >= 4:
+                t_indices = [0, n_times//3, 2*n_times//3, -1]
+            elif n_times >= 2:
+                t_indices = [0, -1]
+            else:
+                t_indices = [0]
+
             plot_solutions_and_error(
                 pinn=pinn,
                 data_processor=data_processor,
                 t_indices=t_indices,
                 save_path=os.path.join(results_dir, 'final_solutions.png')
             )
+            plt.close('all')
+
+            print("Plots generated successfully")
+
         except Exception as e:
             print(f"Warning: Error during plotting: {str(e)}")
             traceback.print_exc()
@@ -419,19 +372,30 @@ def main(args):
         # Save summary statistics
         save_summary(args.output_dir, final_D, loss_history, converged)
 
-        # Special handling for extreme diffusion values
-        if final_D < 1e-6 or final_D > 1e-2:
+        # Check for extreme diffusion values
+        if final_D < 1e-8 or final_D > 1e-1:
             with open(os.path.join(args.output_dir, "warning.txt"), 'w') as f:
-                f.write(f"WARNING: Final diffusion coefficient {final_D} is outside expected range (1e-6 - 1e-2)\n")
-                f.write("This may indicate a convergence issue or an issue with the data.\n")
+                f.write(f"WARNING: Final diffusion coefficient {final_D} may be outside expected range\n")
+                f.write("This may indicate a convergence issue or data quality problem.\n")
+                f.write(f"Final log(D): {final_log_D:.6f}\n")
 
-        # Training completion
+        # Training completion summary
         elapsed_time = time.time() - start_time
         print("\n" + "="*50)
-        print(f"Training completed - {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"HYBRID TRAINING COMPLETED - {time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Total runtime: {elapsed_time/60:.2f} minutes")
-        print(f"Final diffusion coefficient: {final_D:.8f}")
+        print(f"Final diffusion coefficient: {final_D:.8e}")
+        print(f"Final log(D): {final_log_D:.6f}")
         print(f"Convergence status: {converged}")
+        print(f"Total epochs: {len(D_history)}")
+
+        # Convergence analysis
+        if len(D_history) >= 100:
+            recent_std = np.std(D_history[-100:])
+            recent_mean = np.mean(D_history[-100:])
+            rel_variation = recent_std / recent_mean if recent_mean > 0 else float('inf')
+            print(f"Final relative variation: {rel_variation:.6f}")
+
         print("="*50 + "\n")
 
     except Exception as e:
@@ -440,7 +404,7 @@ def main(args):
         return 1
 
     finally:
-        # Clean up
+        # Cleanup
         print("Stopping memory monitoring...")
         memory_monitor.stop()
 
@@ -452,10 +416,13 @@ def main(args):
         except Exception as e:
             print(f"Warning: Could not remove temporary file: {str(e)}")
 
+        # Final garbage collection
+        gc.collect()
+
     return 0
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Train PINN model for diffusion problem')
+    parser = argparse.ArgumentParser(description='Train HYBRID PINN model for diffusion problem')
     parser.add_argument('--input-file', type=str, default=os.path.join(os.path.dirname(__file__), 'intensity_time_series_spatial_temporal.csv'),
                       help='Path to input CSV file')
     parser.add_argument('--output-dir', type=str, default='.',
