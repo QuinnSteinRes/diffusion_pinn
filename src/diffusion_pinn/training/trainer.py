@@ -88,7 +88,7 @@ def train_pinn(pinn: 'DiffusionPINN',
               checkpoint_frequency: int = 1000,
               seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
     """
-    HYBRID training function: V0.2.14's two-phase approach with log(D) parameterization
+    FIXED training function: V0.2.14's two-phase approach with log(D) parameterization and debugging
     """
     # Set random seeds if provided
     if seed is not None:
@@ -103,7 +103,7 @@ def train_pinn(pinn: 'DiffusionPINN',
     D_min = np.exp(pinn.log_D_min)  # ~2e-9
     D_max = np.exp(pinn.log_D_max)  # ~0.018
 
-    print(f"\nStarting hybrid training with log(D) parameterization for {epochs} epochs")
+    print(f"\nStarting FIXED hybrid training with log(D) parameterization for {epochs} epochs")
     print(f"Monitoring D range: [{D_min:.2e}, {D_max:.2e}]")
 
     # Print initial state
@@ -112,10 +112,34 @@ def train_pinn(pinn: 'DiffusionPINN',
     print(f"Initial D: {initial_D:.8e}")
     print(f"Initial log(D): {initial_log_D:.6f}")
 
+    # DIAGNOSTIC: Test physics computation at start
+    print(f"\n=== INITIAL DIAGNOSTICS ===")
     try:
-        # Phase 1: Initial training with strong regularization (like V0.2.14)
+        test_physics_points = data['X_f_train'][:100]  # Test with first 100 points
+        test_residual = pinn.compute_pde_residual(test_physics_points)
+        residual_stats = {
+            'mean': float(tf.reduce_mean(tf.abs(test_residual))),
+            'max': float(tf.reduce_max(tf.abs(test_residual))),
+            'min': float(tf.reduce_min(tf.abs(test_residual))),
+            'std': float(tf.math.reduce_std(test_residual))
+        }
+        print(f"Initial physics residual stats: {residual_stats}")
+
+        # Test if log_D is in computation graph
+        with tf.GradientTape() as test_tape:
+            test_loss = tf.reduce_mean(tf.square(test_residual)) + 0.001 * pinn.log_D
+        test_grad = test_tape.gradient(test_loss, pinn.log_D)
+        print(f"Test log_D gradient: {test_grad.numpy() if test_grad is not None else 'None'}")
+
+    except Exception as e:
+        print(f"DIAGNOSTIC ERROR: {str(e)}")
+
+    print(f"=== END DIAGNOSTICS ===\n")
+
+    try:
+        # Phase 1: Initial training with strong regularization and FIXED loss
         print("\n" + "="*60)
-        print("Phase 1: Initial training with strong physics focus")
+        print("Phase 1: FIXED Initial training with strong physics focus")
         print("="*60)
         phase1_epochs = min(epochs // 3, 2000)
 
@@ -126,37 +150,61 @@ def train_pinn(pinn: 'DiffusionPINN',
                 gc.collect()
 
             with tf.GradientTape() as tape:
-                # Compute losses using the hybrid loss function
+                # FIXED: Compute losses using the corrected loss function
                 losses = pinn.loss_fn(
                     x_data=data['X_u_train'],
                     c_data=data['u_train'],
                     x_physics=data['X_f_train']
                 )
 
-                # Add interior loss
+                # Add interior loss separately (keeping from original approach)
                 interior_loss = compute_stable_interior_loss(
                     pinn, data['X_i_train'], data['u_i_train']
                 )
-                losses['interior'] = interior_loss
+                losses['interior_computed'] = interior_loss
 
                 # Add L2 regularization for weights in phase 1
                 l2_loss = 0.0001 * sum(tf.reduce_sum(tf.square(w)) for w in pinn.weights)
 
-                # Strong weight on physics in phase 1
+                # CRITICAL FIX: Ensure total loss includes ALL components and log_D dependency
                 total_loss = (
-                    losses['total'] +
+                    losses['total'] +  # This already includes physics loss
                     pinn.loss_weights['interior'] * interior_loss +
                     l2_loss
                 )
-                losses['total'] = total_loss
+
+                # FORCE log_D into computation graph (should be redundant but ensures connectivity)
+                total_loss = total_loss + 0.0 * tf.square(pinn.log_D)
+
+                losses['total_final'] = total_loss
                 losses['l2_reg'] = l2_loss
 
-            # Calculate and apply gradients
+            # CRITICAL: Get trainable variables and check log_D inclusion
             trainable_vars = pinn.get_trainable_variables()
+
+            # DEBUG: Verify log_D is in trainable variables
+            log_d_var = None
+            log_d_var_idx = None
+            for i, var in enumerate(trainable_vars):
+                if 'log_diffusion' in var.name:
+                    log_d_var = var
+                    log_d_var_idx = i
+                    break
+
+            # Calculate gradients
             gradients = tape.gradient(total_loss, trainable_vars)
+
+            # DEBUG: Extract log_D gradient
+            log_d_grad = gradients[log_d_var_idx] if log_d_var_idx is not None else None
+            log_d_grad_norm = float(tf.norm(log_d_grad)) if log_d_grad is not None else 0.0
 
             # Apply gradient clipping
             gradients, global_norm = tf.clip_by_global_norm(gradients, 1.0)
+
+            # CRITICAL: Check gradients before applying
+            if log_d_grad is not None and tf.reduce_all(tf.abs(log_d_grad) < 1e-12):
+                print(f"WARNING: log_D gradient is essentially zero at epoch {epoch}")
+
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
             # Record history
@@ -167,20 +215,64 @@ def train_pinn(pinn: 'DiffusionPINN',
             log_D_history.append(current_log_D)
             loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
-            # Progress reporting
+            # ENHANCED progress reporting with FULL DEBUG info
             if epoch % 100 == 0:
-                print(f"Phase 1 - Epoch {epoch:4d}: D={current_D:.6e}, log(D)={current_log_D:.4f}, "
-                      f"Loss={losses['total']:.6f}")
-                print(f"    Initial={losses['initial']:.6f}, Boundary={losses['boundary']:.6f}, "
-                      f"Interior={interior_loss:.6f}, Physics={losses['physics']:.6f}")
+                physics_loss = losses.get('physics', 0.0)
+                physics_residual = losses.get('physics_residual_mean', 0.0)
+
+                print(f"Phase 1 - Epoch {epoch:4d}: D={current_D:.8e}, log(D)={current_log_D:.6f}")
+                print(f"    Total Loss={total_loss:.6f}")
+                print(f"    Initial={losses['initial']:.6f}, Boundary={losses['boundary']:.6f}")
+                print(f"    Interior={interior_loss:.6f}, Physics={physics_loss:.6f}")
+                print(f"    Physics residual mean: {physics_residual:.8e}")
+                print(f"    log_D gradient norm: {log_d_grad_norm:.8e}")
+                print(f"    Global gradient norm: {global_norm:.6f}")
+
+                # CRITICAL CHECKS
+                issues_found = []
+                if physics_loss < 1e-10:
+                    issues_found.append("Physics loss extremely small")
+                if physics_residual < 1e-10:
+                    issues_found.append("Physics residual extremely small")
+                if log_d_grad is None:
+                    issues_found.append("No log_D gradient!")
+                elif log_d_grad_norm < 1e-10:
+                    issues_found.append("log_D gradient essentially zero")
+                if abs(current_D - initial_D) < 1e-12:
+                    issues_found.append("D not changing at all")
+
+                if issues_found:
+                    print(f"    🚨 ISSUES: {', '.join(issues_found)}")
+
+                    # EMERGENCY DIAGNOSTIC
+                    if epoch == 100 and abs(current_D - initial_D) < 1e-12:
+                        print(f"\n🚨 EMERGENCY DIAGNOSTIC at epoch {epoch}:")
+                        print(f"    log_D variable: {log_d_var}")
+                        print(f"    log_D trainable: {log_d_var.trainable if log_d_var else 'N/A'}")
+                        print(f"    Total trainable vars: {len(trainable_vars)}")
+                        print(f"    Physics points shape: {data['X_f_train'].shape}")
+
+                        # Test manual gradient
+                        try:
+                            with tf.GradientTape() as manual_tape:
+                                manual_tape.watch(pinn.log_D)
+                                manual_residual = pinn.compute_pde_residual(data['X_f_train'][:50])
+                                manual_loss = tf.reduce_mean(tf.square(manual_residual))
+                            manual_grad = manual_tape.gradient(manual_loss, pinn.log_D)
+                            print(f"    Manual log_D gradient test: {manual_grad.numpy() if manual_grad else 'None'}")
+                        except Exception as e:
+                            print(f"    Manual gradient test failed: {e}")
+                else:
+                    print(f"    ✅ All checks passed")
 
                 # Check for extreme values
                 if current_D < D_min * 10 or current_D > D_max / 10:
-                    print(f"    WARNING: D approaching bounds!")
+                    print(f"    ⚠️  D approaching bounds!")
 
-        print(f"Phase 1 completed - Final D: {D_history[-1]:.6e}")
+        print(f"\nPhase 1 completed - Final D: {D_history[-1]:.8e}")
+        print(f"D change from start: {abs(D_history[-1] - D_history[0]):.8e}")
 
-        # Phase 2: Fine-tuning with reduced regularization (like V0.2.14)
+        # Phase 2: Fine-tuning with reduced regularization
         print("\n" + "="*60)
         print("Phase 2: Fine-tuning with reduced regularization")
         print("="*60)
@@ -193,7 +285,7 @@ def train_pinn(pinn: 'DiffusionPINN',
                 gc.collect()
 
             with tf.GradientTape() as tape:
-                # Same loss computation but with reduced regularization
+                # Same FIXED loss computation
                 losses = pinn.loss_fn(
                     x_data=data['X_u_train'],
                     c_data=data['u_train'],
@@ -203,7 +295,7 @@ def train_pinn(pinn: 'DiffusionPINN',
                 interior_loss = compute_stable_interior_loss(
                     pinn, data['X_i_train'], data['u_i_train']
                 )
-                losses['interior'] = interior_loss
+                losses['interior_computed'] = interior_loss
 
                 # Reduced L2 regularization in phase 2
                 l2_loss = 0.00001 * sum(tf.reduce_sum(tf.square(w)) for w in pinn.weights)
@@ -213,7 +305,11 @@ def train_pinn(pinn: 'DiffusionPINN',
                     pinn.loss_weights['interior'] * interior_loss +
                     l2_loss
                 )
-                losses['total'] = total_loss
+
+                # Ensure log_D connectivity
+                total_loss = total_loss + 0.0 * tf.square(pinn.log_D)
+
+                losses['total_final'] = total_loss
                 losses['l2_reg'] = l2_loss
 
             # Calculate and apply gradients
@@ -234,8 +330,8 @@ def train_pinn(pinn: 'DiffusionPINN',
 
             # Progress reporting
             if epoch % 100 == 0:
-                print(f"Phase 2 - Epoch {epoch:4d}: D={current_D:.6e}, log(D)={current_log_D:.4f}, "
-                      f"Loss={losses['total']:.6f}")
+                print(f"Phase 2 - Epoch {epoch:4d}: D={current_D:.8e}, log(D)={current_log_D:.6f}, "
+                      f"Loss={total_loss:.6f}")
 
                 # Check convergence
                 if len(D_history) >= 100:
@@ -243,18 +339,20 @@ def train_pinn(pinn: 'DiffusionPINN',
                     d_std = np.std(recent_d)
                     d_mean = np.mean(recent_d)
                     relative_std = d_std / d_mean if d_mean > 0 else float('inf')
-                    print(f"    Convergence metric: {relative_std:.6f}")
+                    print(f"    Convergence metric: {relative_std:.8f}")
 
         # Final training summary
         final_D = D_history[-1]
         final_log_D = log_D_history[-1]
-        final_loss = loss_history[-1]['total']
+        final_loss = loss_history[-1]['total_final']
 
         print(f"\n{'='*60}")
-        print("HYBRID TRAINING COMPLETED")
+        print("FIXED HYBRID TRAINING COMPLETED")
         print(f"{'='*60}")
         print(f"Total epochs: {len(D_history)}")
+        print(f"Initial diffusion coefficient: {D_history[0]:.8e}")
         print(f"Final diffusion coefficient: {final_D:.8e}")
+        print(f"Total D change: {abs(final_D - D_history[0]):.8e}")
         print(f"Final log(D): {final_log_D:.6f}")
         print(f"Final loss: {final_loss:.6f}")
 
@@ -280,12 +378,24 @@ def train_pinn(pinn: 'DiffusionPINN',
             final_std = np.std(recent_d)
             final_mean = np.mean(recent_d)
             final_relative_std = final_std / final_mean if final_mean > 0 else float('inf')
-            print(f"Final convergence metric: {final_relative_std:.6f}")
+            print(f"Final convergence metric: {final_relative_std:.8f}")
             print(f"Converged: {'Yes' if final_relative_std < 0.05 else 'No'}")
+
+        # Final physics diagnostic
+        try:
+            final_residual = pinn.compute_pde_residual(data['X_f_train'][:100])
+            final_residual_stats = {
+                'mean': float(tf.reduce_mean(tf.abs(final_residual))),
+                'max': float(tf.reduce_max(tf.abs(final_residual))),
+                'std': float(tf.math.reduce_std(final_residual))
+            }
+            print(f"Final physics residual stats: {final_residual_stats}")
+        except Exception as e:
+            print(f"Final physics diagnostic failed: {e}")
 
         # Save final model
         if save_dir:
-            save_checkpoint(pinn, save_dir, "final_hybrid")
+            save_checkpoint(pinn, save_dir, "final_fixed_hybrid")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")

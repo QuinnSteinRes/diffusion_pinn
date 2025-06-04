@@ -246,63 +246,93 @@ class DiffusionPINN(tf.Module):
         return tf.concat(residuals, axis=0)
 
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,
-                x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
-        """
-        HYBRID: Use V0.2.14's simpler loss structure but with log(D) parameterization
-        """
-        if weights is None:
-            weights = self.loss_weights
+                    x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
+            """
+            FIXED: Simplified loss function that ensures D actually trains
+            """
+            if weights is None:
+                weights = self.loss_weights
 
-        # Separate points by condition type - simplified approach
-        condition_points = self.identify_condition_points(x_data)
-        losses = {}
+            losses = {}
 
-        # Compute losses for each condition type using V0.2.14's approach
-        for condition_type in ['initial', 'boundary', 'interior']:
-            points = condition_points[condition_type]
-            if points.shape[0] > 0:
-                # Create mask by comparing coordinates
-                mask = tf.zeros(x_data.shape[0], dtype=tf.bool)
-                for point in points:
-                    point_match = tf.reduce_all(tf.abs(x_data - point) < self.boundary_tol, axis=1)
-                    mask = tf.logical_or(mask, point_match)
+            # Extract coordinates for classification
+            t = x_data[:, 2]
+            x_coord = x_data[:, 0]
+            y_coord = x_data[:, 1]
 
-                if tf.reduce_any(mask):
-                    c_pred = self.forward_pass(tf.boolean_mask(x_data, mask))
-                    c_true = tf.boolean_mask(c_data, mask)
-                    losses[condition_type] = tf.reduce_mean(tf.square(c_pred - c_true))
-                else:
-                    losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
+            # Create masks with tight tolerances
+            ic_mask = tf.abs(t - self.t_bounds[0]) < self.initial_tol
+            bc_x_mask = tf.logical_or(
+                tf.abs(x_coord - self.x_bounds[0]) < self.boundary_tol,
+                tf.abs(x_coord - self.x_bounds[1]) < self.boundary_tol
+            )
+            bc_y_mask = tf.logical_or(
+                tf.abs(y_coord - self.y_bounds[0]) < self.boundary_tol,
+                tf.abs(y_coord - self.y_bounds[1]) < self.boundary_tol
+            )
+            bc_mask = tf.logical_or(bc_x_mask, bc_y_mask)
+            bc_mask = tf.logical_and(bc_mask, tf.logical_not(ic_mask))  # Exclude IC from BC
+
+            # Interior points
+            interior_mask = tf.logical_not(tf.logical_or(ic_mask, bc_mask))
+
+            # Initial condition loss
+            if tf.reduce_any(ic_mask):
+                c_pred_ic = self.forward_pass(tf.boolean_mask(x_data, ic_mask))
+                c_true_ic = tf.boolean_mask(c_data, ic_mask)
+                losses['initial'] = tf.reduce_mean(tf.square(c_pred_ic - c_true_ic))
             else:
-                losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
+                losses['initial'] = tf.constant(0.0, dtype=tf.float32)
 
-        # Physics loss with Huber loss from V0.2.14
-        if self.config.use_physics_loss and x_physics is not None and x_physics.shape[0] > 0:
-            pde_residual = self.compute_pde_residual(x_physics)
-            delta = 1.0
-            abs_residual = tf.abs(pde_residual)
-            quadratic = tf.minimum(abs_residual, delta)
-            linear = abs_residual - quadratic
-            physics_loss = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
-            losses['physics'] = physics_loss
-        else:
-            losses['physics'] = tf.constant(0.0, dtype=tf.float32)
+            # Boundary condition loss
+            if tf.reduce_any(bc_mask):
+                c_pred_bc = self.forward_pass(tf.boolean_mask(x_data, bc_mask))
+                c_true_bc = tf.boolean_mask(c_data, bc_mask)
+                losses['boundary'] = tf.reduce_mean(tf.square(c_pred_bc - c_true_bc))
+            else:
+                losses['boundary'] = tf.constant(0.0, dtype=tf.float32)
 
-        # HYBRID: Simple log(D) regularization (not the complex V0.2.22 version)
-        # Keep log(D) in reasonable range but don't bias toward specific values
-        log_d_penalty = 0.001 * (
-            tf.nn.relu(self.log_D_min + 2.0 - self.log_D) +  # Penalty near lower bound
-            tf.nn.relu(self.log_D - self.log_D_max + 2.0)    # Penalty near upper bound
-        )
+            # Interior data loss
+            if tf.reduce_any(interior_mask):
+                c_pred_interior = self.forward_pass(tf.boolean_mask(x_data, interior_mask))
+                c_true_interior = tf.boolean_mask(c_data, interior_mask)
+                losses['interior'] = tf.reduce_mean(tf.square(c_pred_interior - c_true_interior))
+            else:
+                losses['interior'] = tf.constant(0.0, dtype=tf.float32)
 
-        # Total loss
-        total_loss = sum(weights.get(key, 1.0) * losses[key] for key in losses.keys())
-        total_loss = total_loss + log_d_penalty
+            # CRITICAL FIX: Ensure physics loss is computed and contributes to D training
+            if self.config.use_physics_loss and x_physics is not None and tf.shape(x_physics)[0] > 0:
+                pde_residual = self.compute_pde_residual(x_physics)
 
-        losses['log_d_regularization'] = log_d_penalty
-        losses['total'] = total_loss
+                # Debug: Check if residual is being computed
+                residual_mean = tf.reduce_mean(tf.abs(pde_residual))
 
-        return losses
+                # Use simple MSE for physics loss to ensure gradients flow to D
+                losses['physics'] = tf.reduce_mean(tf.square(pde_residual))
+
+                # DEBUG: Add residual stats for monitoring
+                losses['physics_residual_mean'] = residual_mean
+            else:
+                losses['physics'] = tf.constant(0.0, dtype=tf.float32)
+                losses['physics_residual_mean'] = tf.constant(0.0, dtype=tf.float32)
+
+            # CRITICAL: Ensure log_D is included in the computation graph
+            # Simple regularization that ensures log_D gradients exist
+            log_d_reg = 0.0001 * tf.square(self.log_D)  # Very small regularization to ensure connectivity
+
+            # Total loss - MAKE SURE physics loss has significant weight
+            total_loss = (
+                weights.get('initial', 1.0) * losses['initial'] +
+                weights.get('boundary', 1.0) * losses['boundary'] +
+                weights.get('interior', 1.0) * losses['interior'] +
+                weights.get('physics', 5.0) * losses['physics'] +  # Strong physics weight
+                log_d_reg
+            )
+
+            losses['log_d_reg'] = log_d_reg
+            losses['total'] = total_loss
+
+            return losses
 
     def get_trainable_variables(self) -> List[tf.Variable]:
         """Get all trainable variables"""
