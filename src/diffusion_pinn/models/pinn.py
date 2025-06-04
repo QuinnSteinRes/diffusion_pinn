@@ -6,7 +6,7 @@ from ..config import DiffusionConfig
 from ..variables import PINN_VARIABLES
 
 class DiffusionPINN(tf.Module):
-    """Physics-Informed Neural Network for diffusion problems with hybrid approach"""
+    """Physics-Informed Neural Network for diffusion problems - V0.2.14 + minimal log(D)"""
 
     def __init__(
         self,
@@ -37,14 +37,14 @@ class DiffusionPINN(tf.Module):
         self.ub = tf.constant([self.x_bounds[1], self.y_bounds[1], self.t_bounds[1]],
                             dtype=tf.float32)
 
-        # HYBRID: Use logarithmic parameterization but with simpler bounds
+        # MINIMAL CHANGE: Add logarithmic parameterization but keep V0.2.14 structure
         initial_D_value = max(initial_D, 1e-8)
         initial_log_D = np.log(initial_D_value)
 
         print(f"Initial D: {initial_D_value:.8e}")
         print(f"Initial log(D): {initial_log_D:.6f}")
 
-        # Store log(D) as the trainable parameter with reasonable bounds
+        # Store log(D) as the trainable parameter
         self.log_D = tf.Variable(
             initial_log_D,
             dtype=tf.float32,
@@ -52,102 +52,66 @@ class DiffusionPINN(tf.Module):
             name='log_diffusion_coefficient'
         )
 
-        # Simpler bounds than V0.2.22 - wider range but still reasonable
-        self.log_D_min = -20.0   # Corresponds to D ≈ 2e-9
-        self.log_D_max = -4.0    # Corresponds to D ≈ 0.018
-
-        print(f"log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
-        print(f"Corresponding D bounds: [{np.exp(self.log_D_min):.2e}, {np.exp(self.log_D_max):.2e}]")
+        # Simple bounds for log(D)
+        self.log_D_min = -20.0   # ~2e-9
+        self.log_D_max = -4.0    # ~0.018
 
         # Store loss weights from variables
         self.loss_weights = PINN_VARIABLES['loss_weights']
 
-        # Tolerances for condition identification - keep from V0.2.22
+        # Initialize tolerances for condition identification
         self.boundary_tol = 1e-6
         self.initial_tol = 1e-6
 
-        # Build network architecture with enhanced initialization
+        # Build network architecture (same as V0.2.14)
         self._build_network()
 
     def get_diffusion_coefficient(self) -> float:
         """Get the current estimate of the diffusion coefficient"""
-        # Apply soft bounds before conversion
+        # MINIMAL CHANGE: Convert from log(D) to D with simple bounds
         bounded_log_D = tf.clip_by_value(self.log_D, self.log_D_min, self.log_D_max)
         D_value = tf.exp(bounded_log_D).numpy()
         return float(D_value)
 
-    def get_log_diffusion_coefficient(self) -> float:
-        """Get the current log(D) value for debugging"""
-        return float(self.log_D.numpy())
-
     def _build_network(self):
-        """Initialize neural network parameters with enhanced initialization from V0.2.22"""
+        """Initialize neural network parameters - SAME AS V0.2.14"""
+        # Full architecture including input (3: x,y,t) and output (1: concentration)
         architecture = [3] + self.config.hidden_layers + [1]
 
         self.weights = []
         self.biases = []
 
+        # Initialize weights and biases
         for i in range(len(architecture)-1):
             input_dim, output_dim = architecture[i], architecture[i+1]
 
-            # Enhanced initialization based on layer position
-            if i == 0:  # Input layer
-                std_dv = 0.1 / np.sqrt(input_dim)
-            elif i == len(architecture) - 2:  # Output layer
-                std_dv = 0.01 / np.sqrt(input_dim)
-            else:  # Hidden layers
-                if self.config.activation == 'tanh':
-                    std_dv = np.sqrt(2.0 / (input_dim + output_dim))
-                else:
-                    std_dv = np.sqrt(2.0 / input_dim)
+            # Weight initialization
+            if self.config.initialization == 'glorot':
+                std_dv = np.sqrt(2.0 / (input_dim + output_dim))
+            else:  # He initialization
+                std_dv = np.sqrt(2.0 / input_dim)
 
-            # Initialize weights with seed control
-            weight_seed = self.seed + i if self.seed is not None else None
-            if weight_seed is not None:
-                w = tf.Variable(
-                    tf.random.normal([input_dim, output_dim], dtype=tf.float32, seed=weight_seed) * std_dv,
-                    trainable=True,
-                    name=f'w{i+1}'
-                )
-            else:
-                w = tf.Variable(
-                    tf.random.normal([input_dim, output_dim], dtype=tf.float32) * std_dv,
-                    trainable=True,
-                    name=f'w{i+1}'
-                )
-
-            # Initialize biases
-            if i < len(architecture) - 2:
-                # Small positive bias for hidden layers
-                bias_seed = self.seed + 100 + i if self.seed is not None else None
-                if bias_seed is not None:
-                    b_init = tf.random.uniform([output_dim], minval=0.01, maxval=0.05,
-                                             dtype=tf.float32, seed=bias_seed)
-                else:
-                    b_init = tf.random.uniform([output_dim], minval=0.01, maxval=0.05, dtype=tf.float32)
-            else:
-                # Zero bias for output layer
-                b_init = tf.zeros([output_dim], dtype=tf.float32)
-
-            b = tf.Variable(b_init, trainable=True, name=f'b{i+1}')
+            w = tf.Variable(
+                tf.random.normal([input_dim, output_dim], dtype=tf.float32) * std_dv,
+                trainable=True,
+                name=f'w{i+1}'
+            )
+            b = tf.Variable(
+                tf.zeros([output_dim], dtype=tf.float32),
+                trainable=True,
+                name=f'b{i+1}'
+            )
 
             self.weights.append(w)
             self.biases.append(b)
 
     def _normalize_inputs(self, x: tf.Tensor) -> tf.Tensor:
-        """Enhanced input normalization from V0.2.22"""
-        x_float = tf.cast(x, tf.float32)
-        range_tensor = self.ub - self.lb
-        epsilon = tf.constant(1e-8, dtype=tf.float32)
-        safe_range = tf.maximum(range_tensor, epsilon)
-        normalized_01 = (x_float - self.lb) / safe_range
-        normalized_01_clipped = tf.clip_by_value(normalized_01, 0.0, 1.0)
-        normalized_final = 2.0 * normalized_01_clipped - 1.0
-        return tf.clip_by_value(normalized_final, -1.0, 1.0)
+        """Normalize inputs to [-1, 1] - SAME AS V0.2.14"""
+        return 2.0 * (tf.cast(x, tf.float32) - self.lb) / (self.ub - self.lb) - 1.0
 
     @tf.function
     def forward_pass(self, x: tf.Tensor) -> tf.Tensor:
-        """Forward pass through the network"""
+        """Forward pass through the network - SAME AS V0.2.14"""
         X = self._normalize_inputs(x)
         H = X
         for i in range(len(self.weights)-1):
@@ -163,7 +127,7 @@ class DiffusionPINN(tf.Module):
         return output
 
     def identify_condition_points(self, x: tf.Tensor) -> Dict[str, tf.Tensor]:
-        """Separate points into initial and boundary conditions - simplified from V0.2.14"""
+        """Separate points into initial and boundary conditions - SAME AS V0.2.14"""
         t = x[:, 2]
         x_coord = x[:, 0]
         y_coord = x[:, 1]
@@ -171,7 +135,7 @@ class DiffusionPINN(tf.Module):
         # Initial condition mask (t = t_min)
         ic_mask = tf.abs(t - self.t_bounds[0]) < self.initial_tol
 
-        # Boundary condition masks
+        # Boundary condition masks (x = x_min/max or y = y_min/max)
         bc_x_mask = tf.logical_or(
             tf.abs(x_coord - self.x_bounds[0]) < self.boundary_tol,
             tf.abs(x_coord - self.x_bounds[1]) < self.boundary_tol
@@ -182,10 +146,10 @@ class DiffusionPINN(tf.Module):
         )
         bc_mask = tf.logical_or(bc_x_mask, bc_y_mask)
 
-        # Interior points - not boundary or initial
+        # Interior points - all points that are not boundary or initial
         interior_mask = tf.logical_not(tf.logical_or(ic_mask, bc_mask))
 
-        # Ensure boundary mask excludes initial condition points
+        # Ensure masks don't overlap
         bc_mask = tf.logical_and(bc_mask, tf.logical_not(ic_mask))
 
         return {
@@ -196,11 +160,16 @@ class DiffusionPINN(tf.Module):
 
     @tf.function
     def compute_single_batch_residual(self, x_batch: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual with logarithmic D but simpler approach"""
+        """Compute PDE residual for a single batch - MINIMAL CHANGE: Use log(D)"""
         with tf.GradientTape(persistent=True) as tape:
             tape.watch(x_batch)
+            # Calculate function value
             c = self.forward_pass(x_batch)
+
+            # First derivatives - get all at once
             grad = tape.gradient(c, x_batch)
+
+            # Extract individual components with proper reshaping
             dc_dx = tf.reshape(grad[:, 0], (-1, 1))
             dc_dy = tf.reshape(grad[:, 1], (-1, 1))
             dc_dt = tf.reshape(grad[:, 2], (-1, 1))
@@ -208,14 +177,17 @@ class DiffusionPINN(tf.Module):
         # Second derivatives
         d2c_dx2 = tape.gradient(dc_dx, x_batch)[:, 0:1]
         d2c_dy2 = tape.gradient(dc_dy, x_batch)[:, 1:2]
+
+        # Cleanup
         del tape
 
-        # Convert log(D) to D with soft bounds
+        # MINIMAL CHANGE: Convert log(D) to D with simple bounds
         bounded_log_D = tf.clip_by_value(self.log_D, self.log_D_min, self.log_D_max)
         D_value = tf.exp(bounded_log_D)
 
-        # Simple outlier filtering from V0.2.14
+        # Enhanced numerical stability (same as V0.2.14)
         laplacian = d2c_dx2 + d2c_dy2
+        # Apply an outlier filter to the Laplacian for numerical stability
         laplacian_mean = tf.reduce_mean(tf.abs(laplacian))
         laplacian_filtered = tf.where(
             tf.abs(laplacian) > 100.0 * laplacian_mean,
@@ -226,11 +198,12 @@ class DiffusionPINN(tf.Module):
         return dc_dt - D_value * laplacian_filtered
 
     def compute_pde_residual(self, x_f: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual with batching"""
+        """Compute PDE residual with batching - SAME AS V0.2.14"""
+        # For small inputs, just compute directly
         if tf.shape(x_f)[0] <= 1000:
             return self.compute_single_batch_residual(x_f)
 
-        # Process in batches
+        # For larger inputs, process in batches
         batch_size = 1000
         num_points = tf.shape(x_f)[0]
         num_batches = (num_points - 1) // batch_size + 1
@@ -243,118 +216,84 @@ class DiffusionPINN(tf.Module):
             batch_residual = self.compute_single_batch_residual(x_batch)
             residuals.append(batch_residual)
 
+        # Combine all batch residuals
         return tf.concat(residuals, axis=0)
 
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,
-                    x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
-            """
-            FIXED: Simplified loss function that ensures D actually trains
-            """
-            if weights is None:
-                weights = self.loss_weights
+                x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
+        """
+        Compute loss with separated components - SAME AS V0.2.14 except log(D) regularization
+        """
+        if weights is None:
+            weights = self.loss_weights
 
-            losses = {}
+        # Separate points by condition type
+        condition_points = self.identify_condition_points(x_data)
+        losses = {}
 
-            # Extract coordinates for classification
-            t = x_data[:, 2]
-            x_coord = x_data[:, 0]
-            y_coord = x_data[:, 1]
+        # Compute losses for each condition type
+        for condition_type in ['initial', 'boundary', 'interior']:
+            points = condition_points[condition_type]
+            if points.shape[0] > 0:
+                # Create mask by comparing coordinates
+                mask = tf.zeros(x_data.shape[0], dtype=tf.bool)
+                for point in points:
+                    point_match = tf.reduce_all(tf.abs(x_data - point) < self.boundary_tol, axis=1)
+                    mask = tf.logical_or(mask, point_match)
 
-            # Create masks with tight tolerances
-            ic_mask = tf.abs(t - self.t_bounds[0]) < self.initial_tol
-            bc_x_mask = tf.logical_or(
-                tf.abs(x_coord - self.x_bounds[0]) < self.boundary_tol,
-                tf.abs(x_coord - self.x_bounds[1]) < self.boundary_tol
-            )
-            bc_y_mask = tf.logical_or(
-                tf.abs(y_coord - self.y_bounds[0]) < self.boundary_tol,
-                tf.abs(y_coord - self.y_bounds[1]) < self.boundary_tol
-            )
-            bc_mask = tf.logical_or(bc_x_mask, bc_y_mask)
-            bc_mask = tf.logical_and(bc_mask, tf.logical_not(ic_mask))  # Exclude IC from BC
-
-            # Interior points
-            interior_mask = tf.logical_not(tf.logical_or(ic_mask, bc_mask))
-
-            # Initial condition loss
-            if tf.reduce_any(ic_mask):
-                c_pred_ic = self.forward_pass(tf.boolean_mask(x_data, ic_mask))
-                c_true_ic = tf.boolean_mask(c_data, ic_mask)
-                losses['initial'] = tf.reduce_mean(tf.square(c_pred_ic - c_true_ic))
+                if tf.reduce_any(mask):
+                    c_pred = self.forward_pass(tf.boolean_mask(x_data, mask))
+                    c_true = tf.boolean_mask(c_data, mask)
+                    losses[condition_type] = tf.reduce_mean(tf.square(c_pred - c_true))
+                else:
+                    losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
             else:
-                losses['initial'] = tf.constant(0.0, dtype=tf.float32)
+                losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
 
-            # Boundary condition loss
-            if tf.reduce_any(bc_mask):
-                c_pred_bc = self.forward_pass(tf.boolean_mask(x_data, bc_mask))
-                c_true_bc = tf.boolean_mask(c_data, bc_mask)
-                losses['boundary'] = tf.reduce_mean(tf.square(c_pred_bc - c_true_bc))
-            else:
-                losses['boundary'] = tf.constant(0.0, dtype=tf.float32)
+        # Physics loss
+        if self.config.use_physics_loss and x_physics is not None and x_physics.shape[0] > 0:
+            pde_residual = self.compute_pde_residual(x_physics)
 
-            # Interior data loss
-            if tf.reduce_any(interior_mask):
-                c_pred_interior = self.forward_pass(tf.boolean_mask(x_data, interior_mask))
-                c_true_interior = tf.boolean_mask(c_data, interior_mask)
-                losses['interior'] = tf.reduce_mean(tf.square(c_pred_interior - c_true_interior))
-            else:
-                losses['interior'] = tf.constant(0.0, dtype=tf.float32)
+            # Apply Huber loss for PDE residual to reduce sensitivity to outliers
+            delta = 1.0
+            abs_residual = tf.abs(pde_residual)
+            quadratic = tf.minimum(abs_residual, delta)
+            linear = abs_residual - quadratic
+            physics_loss = tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
 
-            # CRITICAL FIX: Ensure physics loss is computed and contributes to D training
-            if self.config.use_physics_loss and x_physics is not None and tf.shape(x_physics)[0] > 0:
-                pde_residual = self.compute_pde_residual(x_physics)
+            losses['physics'] = physics_loss
+        else:
+            losses['physics'] = tf.constant(0.0, dtype=tf.float32)
 
-                # Debug: Check if residual is being computed
-                residual_mean = tf.reduce_mean(tf.abs(pde_residual))
+        # Total loss with regularization for diffusion coefficient
+        total_loss = sum(weights.get(key, 1.0) * losses[key] for key in losses.keys())
 
-                # Use simple MSE for physics loss to ensure gradients flow to D
-                losses['physics'] = tf.reduce_mean(tf.square(pde_residual))
+        # MINIMAL CHANGE: Simple log(D) regularization instead of complex D regularization
+        # Keep log(D) in reasonable range with soft penalty
+        log_d_reg = 0.01 * (
+            tf.nn.relu(self.log_D_min + 2.0 - self.log_D) +
+            tf.nn.relu(self.log_D - self.log_D_max + 2.0)
+        )
 
-                # DEBUG: Add residual stats for monitoring
-                losses['physics_residual_mean'] = residual_mean
-            else:
-                losses['physics'] = tf.constant(0.0, dtype=tf.float32)
-                losses['physics_residual_mean'] = tf.constant(0.0, dtype=tf.float32)
+        total_loss = total_loss + log_d_reg
+        losses['log_d_regularization'] = log_d_reg
+        losses['total'] = total_loss
 
-            # CRITICAL: Ensure log_D is included in the computation graph
-            # Simple regularization that ensures log_D gradients exist
-            log_d_reg = 0.0001 * tf.square(self.log_D)  # Very small regularization to ensure connectivity
-
-            # Total loss - MAKE SURE physics loss has significant weight
-            total_loss = (
-                weights.get('initial', 1.0) * losses['initial'] +
-                weights.get('boundary', 1.0) * losses['boundary'] +
-                weights.get('interior', 1.0) * losses['interior'] +
-                weights.get('physics', 5.0) * losses['physics'] +  # Strong physics weight
-                log_d_reg
-            )
-
-            losses['log_d_reg'] = log_d_reg
-            losses['total'] = total_loss
-
-            return losses
+        return losses
 
     def get_trainable_variables(self) -> List[tf.Variable]:
-        """Get all trainable variables"""
+        """Get all trainable variables - MINIMAL CHANGE: Use log_D instead of D"""
         variables = self.weights + self.biases
         if self.config.diffusion_trainable:
-            variables.append(self.log_D)
+            variables.append(self.log_D)  # Changed from self.D to self.log_D
         return variables
 
     @tf.function
     def predict(self, x: tf.Tensor) -> tf.Tensor:
-        """Make concentration predictions at given points"""
+        """Make concentration predictions at given points - SAME AS V0.2.14"""
         return self.forward_pass(x)
 
     def save(self, filepath: str):
         """Save the model to a file"""
         print(f"Model saving to {filepath} - implement based on your requirements")
         pass
-
-    def print_diffusion_info(self):
-        """Print current diffusion coefficient information for debugging"""
-        current_log_D = self.get_log_diffusion_coefficient()
-        current_D = self.get_diffusion_coefficient()
-        print(f"Current log(D): {current_log_D:.6f}")
-        print(f"Current D: {current_D:.8e}")
-        print(f"log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
