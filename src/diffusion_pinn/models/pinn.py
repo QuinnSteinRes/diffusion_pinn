@@ -73,6 +73,10 @@ class DiffusionPINN(tf.Module):
         D_value = tf.exp(bounded_log_D).numpy()
         return float(D_value)
 
+    def get_log_diffusion_coefficient(self) -> float:
+        """Get the current log(D) value for debugging"""
+        return float(self.log_D.numpy())
+
     def _build_network(self):
         """Initialize neural network parameters - SAME AS V0.2.14"""
         # Full architecture including input (3: x,y,t) and output (1: concentration)
