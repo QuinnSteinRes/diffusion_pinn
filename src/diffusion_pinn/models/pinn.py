@@ -9,65 +9,65 @@ class DiffusionPINN(tf.Module):
     """Physics-Informed Neural Network for diffusion problems with logarithmic D parameterization"""
 
     def __init__(
-        self,
-        spatial_bounds: Dict[str, Tuple[float, float]],
-        time_bounds: Tuple[float, float],
-        initial_D: float = PINN_VARIABLES['initial_D'],
-        config: DiffusionConfig = None,
-        seed: int = None
-    ):
-        super().__init__()
-        self.config = config or DiffusionConfig()
-        self.seed = seed
+            self,
+            spatial_bounds: Dict[str, Tuple[float, float]],
+            time_bounds: Tuple[float, float],
+            initial_D: float = PINN_VARIABLES['initial_D'],
+            config: DiffusionConfig = None,
+            seed: int = None
+        ):
+            super().__init__()
+            self.config = config or DiffusionConfig()
+            self.seed = seed
 
-        # Set random seed if provided
-        if seed is not None:
-            tf.random.set_seed(seed)
-            np.random.seed(seed)
+            # Set random seed if provided
+            if seed is not None:
+                tf.random.set_seed(seed)
+                np.random.seed(seed)
 
-        # Store bounds for normalization
-        self.x_bounds = spatial_bounds['x']
-        self.y_bounds = spatial_bounds['y']
-        self.t_bounds = time_bounds
+            # Store bounds for normalization
+            self.x_bounds = spatial_bounds['x']
+            self.y_bounds = spatial_bounds['y']
+            self.t_bounds = time_bounds
 
-        # Create normalized bounds as tensors
-        self.lb = tf.constant([self.x_bounds[0], self.y_bounds[0], self.t_bounds[0]],
-                            dtype=tf.float32)
-        self.ub = tf.constant([self.x_bounds[1], self.y_bounds[1], self.t_bounds[1]],
-                            dtype=tf.float32)
+            # Create normalized bounds as tensors
+            self.lb = tf.constant([self.x_bounds[0], self.y_bounds[0], self.t_bounds[0]],
+                                dtype=tf.float32)
+            self.ub = tf.constant([self.x_bounds[1], self.y_bounds[1], self.t_bounds[1]],
+                                dtype=tf.float32)
 
-        # LOGARITHMIC PARAMETERIZATION: Initialize log(D) instead of D
-        # This spreads small D values across a larger numerical range
-        initial_D_value = max(initial_D, 1e-8)  # Ensure positive value
-        initial_log_D = np.log(initial_D_value)
+            # LOGARITHMIC PARAMETERIZATION: Initialize log(D) instead of D
+            # This spreads small D values across a larger numerical range
+            initial_D_value = max(initial_D, 1e-8)  # Ensure positive value
+            initial_log_D = np.log(initial_D_value)
 
-        print(f"Initial D: {initial_D_value:.8e}")
-        print(f"Initial log(D): {initial_log_D:.6f}")
+            print(f"Initial D: {initial_D_value:.8e}")
+            print(f"Initial log(D): {initial_log_D:.6f}")
 
-        # Store log(D) as the trainable parameter
-        self.log_D = tf.Variable(
-            initial_log_D,
-            dtype=tf.float32,
-            trainable=self.config.diffusion_trainable,
-            name='log_diffusion_coefficient'
-        )
+            # Store log(D) as the trainable parameter
+            self.log_D = tf.Variable(
+                initial_log_D,
+                dtype=tf.float32,
+                trainable=self.config.diffusion_trainable,
+                name='log_diffusion_coefficient'
+            )
 
-        # Define reasonable bounds for log(D)
-        self.log_D_min = -16.0   # Corresponds to D ≈ 1e-7
-        self.log_D_max = -4.0    # Corresponds to D ≈ 0.018
+            # Define reasonable bounds for log(D)
+            self.log_D_min = -18.0   # Corresponds to D ≈ 1.5e-8 (much wider)
+            self.log_D_max = -4.0    # Corresponds to D ≈ 0.018 (much wider)
 
-        print(f"Log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
-        print(f"Corresponding D bounds: [{np.exp(self.log_D_min):.2e}, {np.exp(self.log_D_max):.2e}]")
+            print(f"WIDER log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
+            print(f"Corresponding D bounds: [{np.exp(self.log_D_min):.2e}, {np.exp(self.log_D_max):.2e}]")
 
-        # Store loss weights from variables
-        self.loss_weights = PINN_VARIABLES['loss_weights']
+            # Store loss weights from variables
+            self.loss_weights = PINN_VARIABLES['loss_weights']
 
-        # Initialize tolerances for condition identification
-        self.boundary_tol = 1e-6
-        self.initial_tol = 1e-6
+            # Initialize tolerances for condition identification
+            self.boundary_tol = 1e-6
+            self.initial_tol = 1e-6
 
-        # Build network architecture
-        self._build_network()
+            # Build network architecture
+            self._build_network()
 
     def get_diffusion_coefficient(self) -> float:
         """Get the current estimate of the diffusion coefficient"""
@@ -296,8 +296,10 @@ class DiffusionPINN(tf.Module):
 
         # UPDATED: Logarithmic D regularization (replaces v0.2.14 D regularization)
         # Add light regularization to keep log(D) in reasonable range
-        log_d_reg = 0.001 * tf.nn.relu(self.log_D_min + 2.0 - self.log_D) + \
-                    0.001 * tf.nn.relu(self.log_D - self.log_D_max + 2.0)
+        log_d_reg = 0.000001 * (
+            tf.nn.relu(self.log_D_min + 1.0 - self.log_D) +  # Only penalty very close to min
+            tf.nn.relu(self.log_D - self.log_D_max + 1.0)    # Only penalty very close to max
+        )
 
         total_loss = total_loss + log_d_reg
         losses['log_d_regularization'] = log_d_reg
