@@ -7,7 +7,7 @@ PINN_VARIABLES = {
     'activation': 'tanh',                   # Best activation for PDEs
 
     # Training Parameters - v0.2.21 proven stable settings
-    'epochs': 1000,                        # Sufficient epochs for convergence
+    'epochs': 12000,                        # Sufficient epochs for convergence
     'learning_rate': 0.0005,                # Stable learning rate (not 0.001)
     'decay_steps': 500,                     # Learning rate decay schedule
     'decay_rate': 0.95,
