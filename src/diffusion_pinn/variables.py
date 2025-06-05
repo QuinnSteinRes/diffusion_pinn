@@ -1,28 +1,31 @@
+# variables_v0221_test.py
+# Exact reproduction of v0.2.21 proven configuration for convergence testing
+
 PINN_VARIABLES = {
-    # Network Architecture - Using v0.2.14 proven architecture
-    'hidden_layers': [40, 40, 40, 40],  # Consistent width that worked well
-    'activation': 'tanh',               # tanh works well for PDEs
+    # Network Architecture - v0.2.21 proven hourglass design
+    'hidden_layers': [16, 32, 64, 32, 16],  # Balanced hourglass architecture that worked
+    'activation': 'tanh',                   # Best activation for PDEs
 
-    # Training Parameters - Using v0.2.14 proven settings
-    'epochs': 10000,                    # Sufficient for convergence
-    'learning_rate': 0.001,             # Stable learning rate
-    'decay_steps': 500,                 # Learning rate decay
+    # Training Parameters - v0.2.21 proven stable settings
+    'epochs': 1000,                        # Sufficient epochs for convergence
+    'learning_rate': 0.0005,                # Stable learning rate (not 0.001)
+    'decay_steps': 500,                     # Learning rate decay schedule
     'decay_rate': 0.95,
-    'random_seed': 42,                  # For reproducibility
+    'random_seed': 42,                      # Fixed seed for reproducibility
 
-    # Diffusion coefficient - Using v0.2.14 proven initial value
-    'initial_D': 0.00009,               # Better initial guess from v0.2.14
+    # Diffusion coefficient - v0.2.21 proven initial value
+    'initial_D': 0.0005,                    # Proven starting point (not 0.00009)
 
-    # Sampling Points - Using v0.2.14 proven distribution
-    'N_u': 1000,    # boundary points
-    'N_f': 15000,   # collocation points (reduced to avoid memory issues)
-    'N_i': 8000,    # interior points
+    # Sampling Points - v0.2.21 proven distribution
+    'N_u': 1000,    # Boundary points
+    'N_f': 15000,   # Physics collocation points (PDE enforcement)
+    'N_i': 8000,    # Interior data supervision points
 
-    # Loss Weights - Using v0.2.14 proven weighting that ensures good concentration fields
+    # Loss Weights - v0.2.21 proven balanced weighting
     'loss_weights': {
-        'initial': 1.0,
-        'boundary': 1.0,
-        'interior': 10.0,   # Strong emphasis on data fitting
-        'physics': 8.0      # Strong physics enforcement
+        'initial': 1.0,     # Initial condition weight
+        'boundary': 1.0,    # Boundary condition weight
+        'interior': 3.0,    # Interior data fitting weight (balanced, not 10.0)
+        'physics': 5.0      # Physics loss weight (balanced, not 8.0)
     }
 }
