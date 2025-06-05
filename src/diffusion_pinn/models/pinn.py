@@ -6,7 +6,7 @@ from ..config import DiffusionConfig
 from ..variables import PINN_VARIABLES
 
 class DiffusionPINN(tf.Module):
-    """Physics-Informed Neural Network for diffusion problems - V0.2.14 + minimal log(D)"""
+    """Physics-Informed Neural Network for diffusion problems with logarithmic D parameterization"""
 
     def __init__(
         self,
@@ -14,8 +14,7 @@ class DiffusionPINN(tf.Module):
         time_bounds: Tuple[float, float],
         initial_D: float = PINN_VARIABLES['initial_D'],
         config: DiffusionConfig = None,
-        seed: int = None,
-        data_processor = None
+        seed: int = None
     ):
         super().__init__()
         self.config = config or DiffusionConfig()
@@ -37,8 +36,9 @@ class DiffusionPINN(tf.Module):
         self.ub = tf.constant([self.x_bounds[1], self.y_bounds[1], self.t_bounds[1]],
                             dtype=tf.float32)
 
-        # MINIMAL CHANGE: Add logarithmic parameterization but keep V0.2.14 structure
-        initial_D_value = max(initial_D, 1e-8)
+        # LOGARITHMIC PARAMETERIZATION: Initialize log(D) instead of D
+        # This spreads small D values across a larger numerical range
+        initial_D_value = max(initial_D, 1e-8)  # Ensure positive value
         initial_log_D = np.log(initial_D_value)
 
         print(f"Initial D: {initial_D_value:.8e}")
@@ -52,9 +52,12 @@ class DiffusionPINN(tf.Module):
             name='log_diffusion_coefficient'
         )
 
-        # Simple bounds for log(D)
-        self.log_D_min = -20.0   # ~2e-9
-        self.log_D_max = -4.0    # ~0.018
+        # Define reasonable bounds for log(D)
+        self.log_D_min = -16.0   # Corresponds to D ≈ 1e-7
+        self.log_D_max = -4.0    # Corresponds to D ≈ 0.018
+
+        print(f"Log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
+        print(f"Corresponding D bounds: [{np.exp(self.log_D_min):.2e}, {np.exp(self.log_D_max):.2e}]")
 
         # Store loss weights from variables
         self.loss_weights = PINN_VARIABLES['loss_weights']
@@ -63,14 +66,13 @@ class DiffusionPINN(tf.Module):
         self.boundary_tol = 1e-6
         self.initial_tol = 1e-6
 
-        # Build network architecture (same as V0.2.14)
+        # Build network architecture
         self._build_network()
 
     def get_diffusion_coefficient(self) -> float:
         """Get the current estimate of the diffusion coefficient"""
-        # MINIMAL CHANGE: Convert from log(D) to D with simple bounds
-        bounded_log_D = tf.clip_by_value(self.log_D, self.log_D_min, self.log_D_max)
-        D_value = tf.exp(bounded_log_D).numpy()
+        # Convert from log(D) back to D
+        D_value = tf.exp(self.log_D).numpy()
         return float(D_value)
 
     def get_log_diffusion_coefficient(self) -> float:
@@ -78,44 +80,59 @@ class DiffusionPINN(tf.Module):
         return float(self.log_D.numpy())
 
     def _build_network(self):
-        """Initialize neural network parameters - SAME AS V0.2.14"""
+        """Initialize neural network parameters (keeping v0.2.14 style)"""
         # Full architecture including input (3: x,y,t) and output (1: concentration)
         architecture = [3] + self.config.hidden_layers + [1]
 
         self.weights = []
         self.biases = []
 
-        # Initialize weights and biases
+        # Initialize weights and biases (v0.2.14 style)
         for i in range(len(architecture)-1):
             input_dim, output_dim = architecture[i], architecture[i+1]
 
-            # Weight initialization
+            # Weight initialization (keeping v0.2.14 approach)
             if self.config.initialization == 'glorot':
                 std_dv = np.sqrt(2.0 / (input_dim + output_dim))
             else:  # He initialization
                 std_dv = np.sqrt(2.0 / input_dim)
 
-            w = tf.Variable(
-                tf.random.normal([input_dim, output_dim], dtype=tf.float32) * std_dv,
-                trainable=True,
-                name=f'w{i+1}'
-            )
-            b = tf.Variable(
-                tf.zeros([output_dim], dtype=tf.float32),
-                trainable=True,
-                name=f'b{i+1}'
-            )
+            # Add seed support for reproducibility
+            if self.seed is not None:
+                weight_seed = self.seed + i
+                w = tf.Variable(
+                    tf.random.normal([input_dim, output_dim], dtype=tf.float32, seed=weight_seed) * std_dv,
+                    trainable=True,
+                    name=f'w{i+1}'
+                )
+                bias_seed = self.seed + 100 + i
+                b = tf.Variable(
+                    tf.random.normal([output_dim], dtype=tf.float32, seed=bias_seed) * 0.01,
+                    trainable=True,
+                    name=f'b{i+1}'
+                )
+            else:
+                w = tf.Variable(
+                    tf.random.normal([input_dim, output_dim], dtype=tf.float32) * std_dv,
+                    trainable=True,
+                    name=f'w{i+1}'
+                )
+                b = tf.Variable(
+                    tf.zeros([output_dim], dtype=tf.float32),
+                    trainable=True,
+                    name=f'b{i+1}'
+                )
 
             self.weights.append(w)
             self.biases.append(b)
 
     def _normalize_inputs(self, x: tf.Tensor) -> tf.Tensor:
-        """Normalize inputs to [-1, 1] - SAME AS V0.2.14"""
+        """Normalize inputs to [-1, 1] (keeping v0.2.14 approach)"""
         return 2.0 * (tf.cast(x, tf.float32) - self.lb) / (self.ub - self.lb) - 1.0
 
     @tf.function
     def forward_pass(self, x: tf.Tensor) -> tf.Tensor:
-        """Forward pass through the network - SAME AS V0.2.14"""
+        """Forward pass through the network (keeping v0.2.14 approach)"""
         X = self._normalize_inputs(x)
         H = X
         for i in range(len(self.weights)-1):
@@ -127,11 +144,15 @@ class DiffusionPINN(tf.Module):
             else:
                 H = tf.nn.relu(H)
 
+        # Apply final layer
         output = tf.matmul(H, self.weights[-1]) + self.biases[-1]
+
+        # Option for non-negative output (uncomment if needed)
+        # return tf.nn.softplus(output)
         return output
 
     def identify_condition_points(self, x: tf.Tensor) -> Dict[str, tf.Tensor]:
-        """Separate points into initial and boundary conditions - SAME AS V0.2.14"""
+        """Separate points into initial and boundary conditions (keeping v0.2.14 approach)"""
         t = x[:, 2]
         x_coord = x[:, 0]
         y_coord = x[:, 1]
@@ -164,7 +185,7 @@ class DiffusionPINN(tf.Module):
 
     @tf.function
     def compute_single_batch_residual(self, x_batch: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual for a single batch - MINIMAL CHANGE: Use log(D)"""
+        """Compute PDE residual for a single batch with logarithmic D"""
         with tf.GradientTape(persistent=True) as tape:
             tape.watch(x_batch)
             # Calculate function value
@@ -185,11 +206,12 @@ class DiffusionPINN(tf.Module):
         # Cleanup
         del tape
 
-        # MINIMAL CHANGE: Convert log(D) to D with simple bounds
-        bounded_log_D = tf.clip_by_value(self.log_D, self.log_D_min, self.log_D_max)
-        D_value = tf.exp(bounded_log_D)
+        # LOGARITHMIC PARAMETERIZATION: Convert log(D) to D with soft constraints
+        # Apply soft bounds to prevent extreme values
+        constrained_log_D = tf.clip_by_value(self.log_D, self.log_D_min + 1.0, self.log_D_max - 1.0)
+        D_value = tf.exp(constrained_log_D)
 
-        # Enhanced numerical stability (same as V0.2.14)
+        # Enhanced numerical stability (keeping v0.2.14 approach)
         laplacian = d2c_dx2 + d2c_dy2
         # Apply an outlier filter to the Laplacian for numerical stability
         laplacian_mean = tf.reduce_mean(tf.abs(laplacian))
@@ -202,7 +224,7 @@ class DiffusionPINN(tf.Module):
         return dc_dt - D_value * laplacian_filtered
 
     def compute_pde_residual(self, x_f: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual with batching - SAME AS V0.2.14"""
+        """Compute PDE residual with batching for memory efficiency (keeping v0.2.14 approach)"""
         # For small inputs, just compute directly
         if tf.shape(x_f)[0] <= 1000:
             return self.compute_single_batch_residual(x_f)
@@ -226,7 +248,7 @@ class DiffusionPINN(tf.Module):
     def loss_fn(self, x_data: tf.Tensor, c_data: tf.Tensor,
                 x_physics: tf.Tensor = None, weights: Dict[str, float] = None) -> Dict[str, tf.Tensor]:
         """
-        Compute loss with separated components - SAME AS V0.2.14 except log(D) regularization
+        Compute loss with separated components (keeping v0.2.14 approach but with log D regularization)
         """
         if weights is None:
             weights = self.loss_weights
@@ -254,7 +276,7 @@ class DiffusionPINN(tf.Module):
             else:
                 losses[condition_type] = tf.constant(0.0, dtype=tf.float32)
 
-        # Physics loss
+        # Physics loss (keeping v0.2.14 Huber loss approach)
         if self.config.use_physics_loss and x_physics is not None and x_physics.shape[0] > 0:
             pde_residual = self.compute_pde_residual(x_physics)
 
@@ -272,12 +294,10 @@ class DiffusionPINN(tf.Module):
         # Total loss with regularization for diffusion coefficient
         total_loss = sum(weights.get(key, 1.0) * losses[key] for key in losses.keys())
 
-        # MINIMAL CHANGE: Simple log(D) regularization instead of complex D regularization
-        # Keep log(D) in reasonable range with soft penalty
-        log_d_reg = 0.01 * (
-            tf.nn.relu(self.log_D_min + 2.0 - self.log_D) +
-            tf.nn.relu(self.log_D - self.log_D_max + 2.0)
-        )
+        # UPDATED: Logarithmic D regularization (replaces v0.2.14 D regularization)
+        # Add light regularization to keep log(D) in reasonable range
+        log_d_reg = 0.001 * tf.nn.relu(self.log_D_min + 2.0 - self.log_D) + \
+                    0.001 * tf.nn.relu(self.log_D - self.log_D_max + 2.0)
 
         total_loss = total_loss + log_d_reg
         losses['log_d_regularization'] = log_d_reg
@@ -286,18 +306,26 @@ class DiffusionPINN(tf.Module):
         return losses
 
     def get_trainable_variables(self) -> List[tf.Variable]:
-        """Get all trainable variables - MINIMAL CHANGE: Use log_D instead of D"""
+        """Get all trainable variables"""
         variables = self.weights + self.biases
         if self.config.diffusion_trainable:
-            variables.append(self.log_D)  # Changed from self.D to self.log_D
+            variables.append(self.log_D)  # Note: now using log_D
         return variables
 
     @tf.function
     def predict(self, x: tf.Tensor) -> tf.Tensor:
-        """Make concentration predictions at given points - SAME AS V0.2.14"""
+        """Make concentration predictions at given points"""
         return self.forward_pass(x)
 
     def save(self, filepath: str):
         """Save the model to a file"""
         print(f"Model saving to {filepath} - implement based on your requirements")
         pass
+
+    def print_diffusion_info(self):
+        """Print current diffusion coefficient information for debugging"""
+        current_log_D = self.get_log_diffusion_coefficient()
+        current_D = self.get_diffusion_coefficient()
+        print(f"Current log(D): {current_log_D:.6f}")
+        print(f"Current D: {current_D:.8e}")
+        print(f"log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")

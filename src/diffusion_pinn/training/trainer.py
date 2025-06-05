@@ -11,9 +11,9 @@ def create_and_initialize_pinn(inputfile: str,
                              N_f: int = PINN_VARIABLES['N_f'],
                              N_i: int = PINN_VARIABLES['N_i'],
                              initial_D: float = PINN_VARIABLES['initial_D'],
-                             seed: int = PINN_VARIABLES['random_seed']) -> Tuple['DiffusionPINN', Dict[str, tf.Tensor]]:
+                             seed: int = None) -> Tuple['DiffusionPINN', Dict[str, tf.Tensor]]:
     """
-    Create and initialize PINN with data - SAME AS V0.2.14 except seed parameter
+    Create and initialize PINN with data - now with logarithmic D parameterization
 
     Args:
         inputfile: Path to data file
@@ -30,35 +30,34 @@ def create_and_initialize_pinn(inputfile: str,
     from ..models.pinn import DiffusionPINN
     from ..config import DiffusionConfig
 
-    # Set random seeds if provided
+    # Set random seeds
     if seed is not None:
         tf.random.set_seed(seed)
         np.random.seed(seed)
 
-    # Process data
+    # Process data with seed for reproducibility
     data_processor = DiffusionDataProcessor(inputfile, seed=seed)
 
     # Get domain information
     domain_info = data_processor.get_domain_info()
 
-    # Create PINN configuration
+    # Create PINN configuration (keeping v0.2.14 defaults)
     config = DiffusionConfig(
         diffusion_trainable=True,
         use_physics_loss=True
     )
 
-    # Initialize PINN
+    # Initialize PINN with logarithmic parameterization
     pinn = DiffusionPINN(
         spatial_bounds=domain_info['spatial_bounds'],
         time_bounds=domain_info['time_bounds'],
         initial_D=initial_D,
         config=config,
-        seed=seed,
-        data_processor=data_processor
+        seed=seed
     )
 
-    # Prepare training data
-    training_data = data_processor.prepare_training_data(N_u, N_f, N_i, seed=seed)
+    # Prepare training data with v0.2.14 temporal density
+    training_data = data_processor.prepare_training_data(N_u, N_f, N_i, temporal_density=10, seed=seed)
 
     return pinn, training_data
 
@@ -69,52 +68,57 @@ def train_pinn(pinn: 'DiffusionPINN',
               save_dir: str = None,
               checkpoint_frequency: int = 1000,
               seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
-    """Training function with adaptive learning and constraints - V0.2.14 + minimal log(D)"""
-
+    """
+    Training function with v0.2.14 two-phase approach but adapted for logarithmic D
+    """
     # Set random seeds if provided
     if seed is not None:
         tf.random.set_seed(seed)
         np.random.seed(seed)
 
     D_history = []
+    log_D_history = []
     loss_history = []
 
-    # MINIMAL CHANGE: Define acceptable range based on log bounds
-    D_min = np.exp(pinn.log_D_min)  # ~2e-9
-    D_max = np.exp(pinn.log_D_max)  # ~0.018
+    # Define acceptable range for diffusion coefficient (wider for log D)
+    D_min = 1e-8
+    D_max = 1e-1
 
-    print(f"Training with log(D) parameterization")
-    print(f"Monitoring D range: [{D_min:.2e}, {D_max:.2e}]")
+    print(f"\nStarting training with logarithmic D parameterization for {epochs} epochs")
+    print(f"Initial D: {pinn.get_diffusion_coefficient():.8e}")
+    print(f"Initial log(D): {pinn.get_log_diffusion_coefficient():.6f}")
 
-    # Use two-phase training for better convergence - SAME AS V0.2.14
+    # Use v0.2.14 two-phase training approach but adapted for log D
     try:
         # Phase 1: Initial training with strong regularization
-        print("Phase 1: Initial training...")
+        print("Phase 1: Initial training with logarithmic D...")
         phase1_epochs = min(epochs // 3, 1000)
 
         for epoch in range(phase1_epochs):
             if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            print(f"\rPhase 1: {epoch+1}/{phase1_epochs}", end="", flush=True)
+            if epoch % 100 == 0:
+                print(f"Phase 1: {epoch+1}/{phase1_epochs}, D={pinn.get_diffusion_coefficient():.6e}, log(D)={pinn.get_log_diffusion_coefficient():.4f}")
 
             with tf.GradientTape() as tape:
-                # Compute losses - SAME AS V0.2.14
+                # Compute losses using v0.2.14 approach
                 losses = pinn.loss_fn(
                     x_data=data['X_u_train'],
                     c_data=data['u_train'],
                     x_physics=data['X_f_train']
                 )
 
+                # Interior loss (v0.2.14 style)
                 interior_loss = tf.reduce_mean(tf.square(
                     pinn.forward_pass(data['X_i_train']) - data['u_i_train']
                 ))
                 losses['interior'] = interior_loss
 
-                # Add L2 regularization for weights in phase 1
+                # Add L2 regularization for weights in phase 1 (v0.2.14 style)
                 l2_loss = 0.0001 * sum(tf.reduce_sum(tf.square(w)) for w in pinn.weights)
 
-                # Strong weight on physics in phase 1
+                # Total loss with v0.2.14 weighting but updated for log D
                 total_loss = (
                     losses['total'] +
                     pinn.loss_weights['interior'] * interior_loss +
@@ -126,31 +130,42 @@ def train_pinn(pinn: 'DiffusionPINN',
             trainable_vars = pinn.get_trainable_variables()
             gradients = tape.gradient(total_loss, trainable_vars)
 
-            # Apply gradient clipping
+            # Apply gradient clipping (v0.2.14 style)
             gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-            # MINIMAL CHANGE: No explicit D constraint clipping since log(D) handles bounds naturally
+            # UPDATED: Logarithmic D constraint (replaces v0.2.14 D clipping)
+            # Soft constraint for log(D) to prevent extreme values
+            if pinn.config.diffusion_trainable:
+                current_log_D = pinn.log_D.numpy()
+                if current_log_D < pinn.log_D_min or current_log_D > pinn.log_D_max:
+                    # Apply soft constraint - nudge towards bounds rather than hard clip
+                    if current_log_D < pinn.log_D_min:
+                        nudged_log_D = 0.9 * current_log_D + 0.1 * pinn.log_D_min
+                    else:
+                        nudged_log_D = 0.9 * current_log_D + 0.1 * pinn.log_D_max
+                    pinn.log_D.assign(nudged_log_D)
 
             # Record history
-            D_history.append(pinn.get_diffusion_coefficient())
+            current_D = pinn.get_diffusion_coefficient()
+            current_log_D = pinn.get_log_diffusion_coefficient()
+            D_history.append(current_D)
+            log_D_history.append(current_log_D)
             loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
-            if epoch % 100 == 0:
-                print(f"\nPhase 1 - Epoch {epoch}, D = {D_history[-1]:.6e}")
-
-        # Phase 2: Fine-tuning with reduced regularization
-        print("\nPhase 2: Fine-tuning...")
+        # Phase 2: Fine-tuning with reduced regularization (v0.2.14 style)
+        print("Phase 2: Fine-tuning with logarithmic D...")
         phase2_epochs = epochs - phase1_epochs
 
         for epoch in range(phase2_epochs):
             if epoch % 50 == 0:
                 tf.keras.backend.clear_session()
 
-            print(f"\rPhase 2: {epoch+1}/{phase2_epochs}", end="", flush=True)
+            if epoch % 100 == 0:
+                print(f"Phase 2: {epoch+1}/{phase2_epochs}, D={pinn.get_diffusion_coefficient():.6e}, log(D)={pinn.get_log_diffusion_coefficient():.4f}")
 
             with tf.GradientTape() as tape:
-                # Same loss computation but with reduced regularization
+                # Same loss computation but with reduced regularization (v0.2.14 style)
                 losses = pinn.loss_fn(
                     x_data=data['X_u_train'],
                     c_data=data['u_train'],
@@ -162,7 +177,7 @@ def train_pinn(pinn: 'DiffusionPINN',
                 ))
                 losses['interior'] = interior_loss
 
-                # No L2 regularization in phase 2
+                # No L2 regularization in phase 2 (v0.2.14 style)
                 total_loss = losses['total'] + pinn.loss_weights['interior'] * interior_loss
                 losses['total'] = total_loss
 
@@ -170,46 +185,61 @@ def train_pinn(pinn: 'DiffusionPINN',
             trainable_vars = pinn.get_trainable_variables()
             gradients = tape.gradient(total_loss, trainable_vars)
 
-            # Reduced gradient clipping in phase 2
+            # Reduced gradient clipping in phase 2 (v0.2.14 style)
             gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-            # MINIMAL CHANGE: No explicit D constraint clipping
+            # UPDATED: Softer constraint in phase 2 for log(D)
+            if pinn.config.diffusion_trainable:
+                current_log_D = pinn.log_D.numpy()
+                # Only apply very soft constraints in phase 2
+                if current_log_D < pinn.log_D_min - 2.0:
+                    pinn.log_D.assign(pinn.log_D_min - 2.0)
+                elif current_log_D > pinn.log_D_max + 2.0:
+                    pinn.log_D.assign(pinn.log_D_max + 2.0)
 
             # Record history
-            D_history.append(pinn.get_diffusion_coefficient())
+            current_D = pinn.get_diffusion_coefficient()
+            current_log_D = pinn.get_log_diffusion_coefficient()
+            D_history.append(current_D)
+            log_D_history.append(current_log_D)
             loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
-            if epoch % 100 == 0:
-                print(f"\nPhase 2 - Epoch {epoch}, D = {D_history[-1]:.6e}")
-
         # Final summary
-        final_D = D_history[-1]
-        print(f"\nTraining completed. Final D: {final_D:.8e}")
+        final_D = pinn.get_diffusion_coefficient()
+        final_log_D = pinn.get_log_diffusion_coefficient()
+        print(f"\nTraining completed:")
+        print(f"Final D: {final_D:.8e}")
+        print(f"Final log(D): {final_log_D:.6f}")
 
-        # Check if D stayed in reasonable bounds
-        if final_D < D_min * 10 or final_D > D_max / 10:
-            print(f"WARNING: Final D may be outside expected range")
+        # Check convergence
+        if len(log_D_history) >= 100:
+            recent_log_d = log_D_history[-100:]
+            log_d_std = np.std(recent_log_d)
+            print(f"log(D) convergence metric (last 100 epochs): {log_d_std:.6f}")
+            print(f"Converged: {'Yes' if log_d_std < 0.05 else 'No'}")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
     except Exception as e:
         print(f"\nError during training: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
     return D_history, loss_history
 
-def save_checkpoint(pinn: 'DiffusionPINN', save_dir: str, epoch: str) -> None:
+def save_checkpoint(pinn: 'DiffusionPINN', save_dir: str, epoch: int) -> None:
     """
-    Save model checkpoint - MINIMAL CHANGE: Save log(D) info
+    Save model checkpoint with logarithmic D information
 
     Args:
         pinn: PINN model to save
         save_dir: Directory to save checkpoint
-        epoch: Epoch identifier
+        epoch: Current epoch number
     """
     os.makedirs(save_dir, exist_ok=True)
 
-    # Save configuration
+    # Save configuration with log D info
     config_dict = {
         'hidden_layers': pinn.config.hidden_layers,
         'activation': pinn.config.activation,
@@ -222,9 +252,8 @@ def save_checkpoint(pinn: 'DiffusionPINN', save_dir: str, epoch: str) -> None:
         },
         'time_bounds': [float(pinn.t_bounds[0]), float(pinn.t_bounds[1])],
         'D_value': float(pinn.get_diffusion_coefficient()),
-        'log_D_value': float(pinn.log_D.numpy()),  # ADDED: log(D) value
-        'log_D_bounds': [float(pinn.log_D_min), float(pinn.log_D_max)],  # ADDED: log(D) bounds
-        'parameterization': 'logarithmic'  # ADDED: parameterization type
+        'log_D_value': float(pinn.get_log_diffusion_coefficient()) if hasattr(pinn, 'log_D') else None,
+        'parameterization': 'logarithmic' if hasattr(pinn, 'log_D') else 'standard'
     }
 
     with open(os.path.join(save_dir, f'config_{epoch}.json'), 'w') as f:
@@ -243,7 +272,7 @@ def save_checkpoint(pinn: 'DiffusionPINN', save_dir: str, epoch: str) -> None:
 
 def load_pretrained_pinn(load_dir: str, data_path: str) -> Tuple['DiffusionPINN', 'DiffusionDataProcessor']:
     """
-    Load a pretrained PINN model - SAME AS V0.2.14
+    Load a pretrained PINN model
 
     Args:
         load_dir: Directory containing saved model
