@@ -1,28 +1,31 @@
+# variables_diagnostic.py
+# Test intermediate loss weighting to balance convergence vs field prediction
+
 PINN_VARIABLES = {
-    # Network Architecture - v0.2.21 proven hourglass design
-    'hidden_layers': [16, 32, 64, 32, 16],  # Balanced hourglass architecture that worked
-    'activation': 'tanh',                   # Best activation for PDEs
+    # v0.2.21 proven architecture
+    'hidden_layers': [16, 32, 64, 32, 16],
+    'activation': 'tanh',
 
-    # Training Parameters - v0.2.21 proven stable settings
-    'epochs': 1000,                        # Sufficient epochs for convergence
-    'learning_rate': 0.0005,                # Stable learning rate (not 0.001)
-    'decay_steps': 500,                     # Learning rate decay schedule
+    # Quick test parameters
+    'epochs': 12000,  # Enough to see trends
+    'learning_rate': 0.0005,  # v0.2.21 stable rate
+    'decay_steps': 500,
     'decay_rate': 0.95,
-    'random_seed': 42,                      # Fixed seed for reproducibility
+    'random_seed': 42,
 
-    # Diffusion coefficient - v0.2.21 proven initial value
-    'initial_D': 0.0005,                    # Proven starting point (not 0.00009)
+    # v0.2.21 proven initial value
+    'initial_D': 0.0005,
 
-    # Sampling Points - v0.2.21 proven distribution
-    'N_u': 1000,    # Boundary points
-    'N_f': 15000,   # Physics collocation points (PDE enforcement)
-    'N_i': 8000,    # Interior data supervision points
+    # v0.2.21 proven sampling
+    'N_u': 1000,
+    'N_f': 15000,
+    'N_i': 8000,
 
-    # Loss Weights - v0.2.21 proven balanced weighting
+    # INTERMEDIATE loss weights - testing hypothesis
     'loss_weights': {
-        'initial': 1.0,     # Initial condition weight
-        'boundary': 1.0,    # Boundary condition weight
-        'interior': 3.0,    # Interior data fitting weight (balanced, not 10.0)
-        'physics': 5.0      # Physics loss weight (balanced, not 8.0)
+        'initial': 1.0,
+        'boundary': 1.0,
+        'interior': 6.0,    # Between v0.2.21 (3.0) and v0.2.26 (10.0)
+        'physics': 6.5      # Between v0.2.21 (5.0) and v0.2.26 (8.0), slightly favoring physics
     }
 }
