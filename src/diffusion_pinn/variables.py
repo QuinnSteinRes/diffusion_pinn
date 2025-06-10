@@ -11,7 +11,7 @@ PINN_VARIABLES = {
     'random_seed': 42,                  # For reproducibility
 
     # Diffusion coefficient - Using v0.2.14 proven initial value
-    'initial_D': 0.00009,               # Better initial guess from v0.2.14
+    'initial_D': 0.0005,               # Better initial guess from v0.2.14
 
     # Sampling Points - Using v0.2.14 proven distribution
     'N_u': 1000,    # boundary points
