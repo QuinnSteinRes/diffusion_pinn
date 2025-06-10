@@ -54,7 +54,7 @@ class DiffusionPINN(tf.Module):
 
         # Define reasonable bounds for log(D)
         self.log_D_min = -16.0   # Corresponds to D ≈ 1e-7
-        self.log_D_max = -4.0    # Corresponds to D ≈ 0.018
+        self.log_D_max = -6.0    #
 
         print(f"Log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
         print(f"Corresponding D bounds: [{np.exp(self.log_D_min):.2e}, {np.exp(self.log_D_max):.2e}]")
