@@ -1,6 +1,6 @@
 PINN_VARIABLES = {
     # Network Architecture - Using v0.2.14 proven architecture
-    'hidden_layers': [40, 40, 40, 40],  # Consistent width that worked well
+    'hidden_layers': [40, 40, 40, 40],  # Consistent width that worked well testing testing
     'activation': 'tanh',               # tanh works well for PDEs
 
     # Training Parameters - Using v0.2.14 proven settings
