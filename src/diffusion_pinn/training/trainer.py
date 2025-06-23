@@ -105,28 +105,22 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
     # Enhanced training schedule for logarithmic parameterization
     phase_configs = [
         {
-            'name': 'Phase 1: Physics Learning (Log D)',
-            'epochs': epochs // 4,
-            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 3.0, 'physics': 5.0},
-            'lr_schedule': lambda epoch, total: 1e-3 * (0.95 ** (epoch // 100)),
-            'regularization': 0.001,
-            'description': 'Focus on learning physics with log(D) parameterization'
+            'name': 'Phase 1: Data Learning',
+            'weights': {'initial': 5.0, 'boundary': 5.0, 'interior': 10.0, 'physics': 1.0},
+            'lr_schedule': lambda epoch, total: 2e-3 * (0.95 ** (epoch // 100)),
+            'regularization': 0.0001,  # Lower to allow weight diversity
         },
         {
-            'name': 'Phase 2: Data Fitting (Log D)',
-            'epochs': epochs // 2,
-            'weights': {'initial': 1.0, 'boundary': 1.0, 'interior': 5.0, 'physics': 3.0},
-            'lr_schedule': lambda epoch, total: 5e-4 * (0.98 ** (epoch // 50)),
+            'name': 'Phase 2: Add Physics',
+            'weights': {'initial': 3.0, 'boundary': 3.0, 'interior': 8.0, 'physics': 3.0},
+            'lr_schedule': lambda epoch, total: 1e-3,  # RESTART higher
             'regularization': 0.0005,
-            'description': 'Balance physics with data fitting using log(D)'
         },
         {
-            'name': 'Phase 3: Fine Tuning (Log D)',
-            'epochs': epochs // 4,
-            'weights': {'initial': 0.5, 'boundary': 0.5, 'interior': 10.0, 'physics': 1.0},
-            'lr_schedule': lambda epoch, total: 1e-4 * (0.99 ** (epoch // 25)),
-            'regularization': 0.0001,
-            'description': 'Fine-tune with emphasis on data accuracy'
+            'name': 'Phase 3: Balance',
+            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 6.0, 'physics': 4.0},
+            'lr_schedule': lambda epoch, total: 5e-4 * (0.99 ** (epoch // 50)),
+            'regularization': 0.001,
         }
     ]
 
@@ -340,28 +334,22 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
     # Standard training schedule
     phase_configs = [
         {
-            'name': 'Phase 1: Physics Learning',
-            'epochs': epochs // 4,
-            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 3.0, 'physics': 5.0},
-            'lr_schedule': lambda epoch, total: 1e-3 * (0.95 ** (epoch // 100)),
-            'regularization': 0.001,
-            'description': 'Focus on learning physics constraints'
+            'name': 'Phase 1: Data Learning',
+            'weights': {'initial': 5.0, 'boundary': 5.0, 'interior': 10.0, 'physics': 1.0},
+            'lr_schedule': lambda epoch, total: 2e-3 * (0.95 ** (epoch // 100)),
+            'regularization': 0.0001,  # Lower to allow weight diversity
         },
         {
-            'name': 'Phase 2: Data Fitting',
-            'epochs': epochs // 2,
-            'weights': {'initial': 1.0, 'boundary': 1.0, 'interior': 5.0, 'physics': 3.0},
-            'lr_schedule': lambda epoch, total: 5e-4 * (0.98 ** (epoch // 50)),
+            'name': 'Phase 2: Add Physics',
+            'weights': {'initial': 3.0, 'boundary': 3.0, 'interior': 8.0, 'physics': 3.0},
+            'lr_schedule': lambda epoch, total: 1e-3,  # RESTART higher
             'regularization': 0.0005,
-            'description': 'Balance physics with data fitting'
         },
         {
-            'name': 'Phase 3: Fine Tuning',
-            'epochs': epochs // 4,
-            'weights': {'initial': 0.5, 'boundary': 0.5, 'interior': 10.0, 'physics': 1.0},
-            'lr_schedule': lambda epoch, total: 1e-4 * (0.99 ** (epoch // 25)),
-            'regularization': 0.0001,
-            'description': 'Fine-tune with emphasis on data accuracy'
+            'name': 'Phase 3: Balance',
+            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 6.0, 'physics': 4.0},
+            'lr_schedule': lambda epoch, total: 5e-4 * (0.99 ** (epoch // 50)),
+            'regularization': 0.001,
         }
     ]
 

@@ -4,7 +4,7 @@ PINN_VARIABLES = {
     'activation': 'tanh',                   # Best for PDEs
 
     # Training
-    'epochs': 2500,                        # Enough for convergence
+    'epochs': 12000,                        # Enough for convergence
     'learning_rate': 0.0005,                # Stable learning rate
     'random_seed': 42,                      # For reproducibility
 
