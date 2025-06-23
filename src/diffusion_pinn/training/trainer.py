@@ -107,7 +107,7 @@ def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
         {
             'name': 'Phase 1: Physics Learning (Log D)',
             'epochs': epochs // 4,
-            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 0.5, 'physics': 10.0},
+            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 3.0, 'physics': 5.0},
             'lr_schedule': lambda epoch, total: 1e-3 * (0.95 ** (epoch // 100)),
             'regularization': 0.001,
             'description': 'Focus on learning physics with log(D) parameterization'
