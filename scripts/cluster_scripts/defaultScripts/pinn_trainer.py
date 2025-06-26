@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Improved pinn_trainer.py with memory management and stability fixes
+# Improved pinn_trainer.py with memory management, stability fixes, and version logging
 
 import os
 import sys
@@ -8,6 +8,7 @@ import time
 import signal
 import argparse
 import traceback
+import subprocess
 from pathlib import Path
 import psutil
 import numpy as np
@@ -52,7 +53,163 @@ from diffusion_pinn.variables import PINN_VARIABLES
 print("diffusion_pinn location:", diffusion_pinn.__file__)
 print("train_pinn location:", train_pinn.__code__.co_filename)
 
-# Memory monitoring class for memory usage tracking
+def log_version_and_environment():
+    """Log comprehensive version and environment information"""
+    print("\n" + "=" * 80)
+    print("PINN DIFFUSION COEFFICIENT ESTIMATION - VERSION INFORMATION")
+    print("=" * 80)
+
+    # Basic run information
+    import datetime
+    print(f"Start Time: {datetime.datetime.now()}")
+    print(f"Job ID: {os.environ.get('JOB_ID', 'LOCAL')}")
+    print(f"Hostname: {os.environ.get('HOSTNAME', 'unknown')}")
+    print(f"User: {os.environ.get('USER', 'unknown')}")
+    print(f"Working Directory: {os.getcwd()}")
+
+    print(f"\nSOFTWARE VERSIONS:")
+    print("-" * 40)
+
+    # Package versions
+    try:
+        print(f"diffusion_pinn version: {getattr(diffusion_pinn, '__version__', 'unknown')}")
+        print(f"diffusion_pinn location: {diffusion_pinn.__file__}")
+    except Exception as e:
+        print(f"diffusion_pinn version: error - {e}")
+
+    print(f"Python version: {sys.version.split()[0]}")
+    print(f"Python executable: {sys.executable}")
+
+    try:
+        print(f"TensorFlow version: {tf.__version__}")
+    except Exception as e:
+        print(f"TensorFlow version: error - {e}")
+
+    try:
+        print(f"NumPy version: {np.__version__}")
+    except Exception as e:
+        print(f"NumPy version: error - {e}")
+
+    try:
+        print(f"Pandas version: {pd.__version__}")
+    except Exception as e:
+        print(f"Pandas version: error - {e}")
+
+    print(f"\nGIT REPOSITORY STATUS:")
+    print("-" * 40)
+
+    # Git information
+    git_repo_path = "/state/partition1/home/qs8/projects/diffusion_pinn"
+    try:
+        if os.path.exists(os.path.join(git_repo_path, '.git')):
+            # Get commit hash
+            result = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print(f"Git commit: {result.stdout.strip()}")
+            else:
+                print(f"Git commit: command failed - {result.stderr}")
+
+            # Get branch
+            result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print(f"Git branch: {result.stdout.strip()}")
+
+            # Get commit message
+            result = subprocess.run(['git', 'log', '-1', '--pretty=format:%s'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print(f"Commit message: {result.stdout.strip()}")
+
+            # Get commit date
+            result = subprocess.run(['git', 'log', '-1', '--pretty=format:%ci'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print(f"Commit date: {result.stdout.strip()}")
+
+            # Check working directory status
+            result = subprocess.run(['git', 'diff-index', '--quiet', 'HEAD', '--'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print("Working directory: clean")
+            else:
+                print("Working directory: has uncommitted changes")
+                # Show modified files
+                result = subprocess.run(['git', 'diff', '--name-only'],
+                                      cwd=git_repo_path,
+                                      capture_output=True,
+                                      text=True,
+                                      timeout=10)
+                if result.returncode == 0 and result.stdout.strip():
+                    print("Modified files:")
+                    for file in result.stdout.strip().split('\n'):
+                        print(f"  {file}")
+
+            # Get recent commits
+            print("\nRecent commits:")
+            result = subprocess.run(['git', 'log', '--oneline', '-5'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    print(f"  {line}")
+
+        else:
+            print(f"Git repository: not found at {git_repo_path}")
+
+    except subprocess.TimeoutExpired:
+        print("Git commands: timed out")
+    except Exception as e:
+        print(f"Git status: error - {e}")
+
+    print(f"\nRUNTIME ENVIRONMENT:")
+    print("-" * 40)
+    print(f"PYTHONPATH: {os.environ.get('PYTHONPATH', 'not set')}")
+    print(f"Conda environment: {os.environ.get('CONDA_DEFAULT_ENV', 'unknown')}")
+    print(f"PATH (first 3 entries): {':'.join(os.environ.get('PATH', '').split(':')[:3])}")
+
+    # System information
+    print(f"\nSYSTEM INFORMATION:")
+    print("-" * 40)
+    try:
+        mem = psutil.virtual_memory()
+        print(f"Total memory: {mem.total / (1024**3):.1f} GB")
+        print(f"Available memory: {mem.available / (1024**3):.1f} GB")
+        print(f"CPU count: {psutil.cpu_count()}")
+    except Exception as e:
+        print(f"System info error: {e}")
+
+    print(f"\nPINN CONFIGURATION:")
+    print("-" * 40)
+    try:
+        for key, value in sorted(PINN_VARIABLES.items()):
+            print(f"{key}: {value}")
+    except Exception as e:
+        print(f"PINN variables error: {e}")
+
+    print("=" * 80)
+    print("END VERSION INFORMATION - STARTING TRAINING")
+    print("=" * 80 + "\n")
+
+# [Rest of the existing code remains the same - MemoryMonitor, setup_signal_handlers, etc.]
+
 class MemoryMonitor:
     def __init__(self, log_file='memory_usage.log', interval=10):
         self.log_file = log_file
@@ -264,34 +421,13 @@ def check_convergence(D_history, threshold=0.001, window=100):
 
     return is_converged
 
-def create_constrained_optimizer(learning_rate=1e-3, diffusion_min=1e-6, diffusion_max=1e-2):
-    """Create an optimizer that constrains the diffusion coefficient"""
-
-    # Custom optimizer wrapper to apply constraints after each update
-    class ConstrainedAdam(tf.keras.optimizers.Adam):
-        def __init__(self, pinn_model, **kwargs):
-            super().__init__(**kwargs)
-            self.pinn_model = pinn_model
-
-        def _resource_apply_dense(self, grad, var, apply_state=None):
-            # Apply the normal Adam update
-            result = super()._resource_apply_dense(grad, var, apply_state)
-
-            # Apply constraints on diffusion coefficient
-            if var.name == self.pinn_model.D.name:
-                value = tf.clip_by_value(var, diffusion_min, diffusion_max)
-                var.assign(value)
-
-            return result
-
-    return lambda pinn_model: ConstrainedAdam(
-        pinn_model,
-        learning_rate=learning_rate
-    )
-
 def main(args):
     """Main training function with improved error handling and memory management"""
     start_time = time.time()
+
+    # Log version information FIRST
+    log_version_and_environment()
+
     print("\n" + "="*50)
     print(f"Starting PINN training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Input file: {args.input_file}")
@@ -395,12 +531,10 @@ def main(args):
 
             # Plot loss history
             plot_loss_history(loss_history, save_dir=results_dir)
-            #plt.savefig(os.path.join(plot_dir, 'loss_history.png'))
             plt.close()
 
             # Plot diffusion coefficient convergence
             plot_diffusion_convergence(D_history, save_dir=results_dir)
-            #plt.savefig(os.path.join(plot_dir, 'd_convergence.png'))
             plt.close()
 
             # Plot solutions
