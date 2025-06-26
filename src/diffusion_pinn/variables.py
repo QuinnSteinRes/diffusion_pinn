@@ -12,9 +12,9 @@ PINN_VARIABLES = {
     'initial_D': 0.0005,                    # Reasonable starting point
 
     # Sampling points
-    'N_u': 4000,    # Boundary points
-    'N_f': 50000,   # Physics points (PDE)
-    'N_i': 15000,    # Interior data points
+    'N_u': 1000,    # Boundary points
+    'N_f': 15000,   # Physics points (PDE)
+    'N_i': 8000,    # Interior data points
 
     # Loss weights - balanced for stability
     'loss_weights': {
