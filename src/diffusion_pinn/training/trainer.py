@@ -341,7 +341,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
         {
             'name': 'Phase 1: Data Learning',
             'epochs': epochs // 4,  # ← YOU FORGOT THIS
-            'weights': {'initial': 5.0, 'boundary': 5.0, 'interior': 10.0, 'physics': 1.0},
+            'weights': {'initial': 5.0, 'boundary': 5.0, 'interior': 1.0, 'physics': 10.0},
             'lr_schedule': lambda epoch, total: 2e-3 * (0.95 ** (epoch // 100)),
             'regularization': 0.0001,
             'description': 'Focus on data fitting first'
@@ -349,7 +349,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
         {
             'name': 'Phase 2: Add Physics',
             'epochs': epochs // 2,  # ← YOU FORGOT THIS
-            'weights': {'initial': 3.0, 'boundary': 3.0, 'interior': 8.0, 'physics': 3.0},
+            'weights': {'initial': 3.0, 'boundary': 3.0, 'interior': 5.0, 'physics': 3.0},
             'lr_schedule': lambda epoch, total: 1e-3,
             'regularization': 0.0005,
             'description': 'Gradually add physics constraints'
@@ -357,7 +357,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
         {
             'name': 'Phase 3: Balance',
             'epochs': epochs // 4,  # ← YOU FORGOT THIS
-            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 6.0, 'physics': 4.0},
+            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 10.0, 'physics': 2.0},
             'lr_schedule': lambda epoch, total: 5e-4 * (0.99 ** (epoch // 50)),
             'regularization': 0.001,
             'description': 'Final balanced training'
