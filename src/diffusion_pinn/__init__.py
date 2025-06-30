@@ -8,13 +8,13 @@ from .variables import PINN_VARIABLES
 # Backward compatibility alias
 DiffusionPINN = OpenSystemDiffusionPINN
 
-__version__ = '0.3.0-open-system'
+__version__ = '0.3.0'
 
 # Base components that should always be available
 __all__ = [
     'DiffusionConfig',
     'OpenSystemDiffusionPINN',
-    'DiffusionDataProcessor', 
+    'DiffusionDataProcessor',
     'PINN_VARIABLES',
     'DiffusionPINN',  # Compatibility alias
 ]
