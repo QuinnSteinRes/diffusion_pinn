@@ -5,375 +5,264 @@ import os
 import json
 import gc
 from ..variables import PINN_VARIABLES
-from ..models.pinn import DiffusionPINN
 
-def create_and_initialize_pinn(inputfile: str,
-                             N_u: int = PINN_VARIABLES['N_u'],
-                             N_f: int = PINN_VARIABLES['N_f'],
-                             N_i: int = PINN_VARIABLES['N_i'],
-                             initial_D: float = PINN_VARIABLES['initial_D'],
-                             seed: int = PINN_VARIABLES['random_seed']) -> Tuple['DiffusionPINN', Dict[str, tf.Tensor]]:
-    """
-    Create and initialize PINN with data - includes logarithmic D parameterization
-
-    Args:
-        inputfile: Path to data file
-        N_u: Number of boundary/initial condition points
-        N_f: Number of collocation points
-        N_i: Number of interior supervision points
-        initial_D: Initial guess for diffusion coefficient
-        seed: Random seed for reproducibility
-
-    Returns:
-        Tuple of (initialized PINN, training data dictionary)
-    """
+def create_open_system_pinn(inputfile: str,
+                           N_u: int = PINN_VARIABLES['N_u'],
+                           N_f: int = PINN_VARIABLES['N_f'],
+                           N_i: int = PINN_VARIABLES['N_i'],
+                           initial_D: float = PINN_VARIABLES['initial_D'],
+                           initial_k: float = 0.001,
+                           seed: int = PINN_VARIABLES['random_seed']) -> Tuple['OpenSystemDiffusionPINN', Dict[str, tf.Tensor]]:
+    """Create PINN for open diffusion system with boundary flux"""
     from ..data.processor import DiffusionDataProcessor
-    from ..models.pinn import DiffusionPINN
+    from ..models.pinn import OpenSystemDiffusionPINN
     from ..config import DiffusionConfig
 
-    # Set random seeds
     if seed is not None:
         tf.random.set_seed(seed)
         np.random.seed(seed)
 
     # Process data
     data_processor = DiffusionDataProcessor(inputfile, seed=seed)
-
-    # Get domain information
     domain_info = data_processor.get_domain_info()
 
-    # Create PINN configuration
+    # Check mass conservation
+    total_mass_over_time = []
+    for t_idx in range(len(data_processor.t)):
+        total_mass = np.sum(data_processor.usol[:, :, t_idx])
+        total_mass_over_time.append(total_mass)
+
+    mass_loss_rate = (total_mass_over_time[-1] - total_mass_over_time[0]) / (data_processor.t[-1] - data_processor.t[0])
+    print(f"Mass loss analysis:")
+    print(f"  Initial total mass: {total_mass_over_time[0]:.3f}")
+    print(f"  Final total mass: {total_mass_over_time[-1]:.3f}")
+    print(f"  Mass loss rate: {mass_loss_rate:.6f} units/time")
+    print(f"  Relative mass loss: {(total_mass_over_time[0] - total_mass_over_time[-1])/total_mass_over_time[0]*100:.1f}%")
+
+    # Estimate initial boundary permeability from mass loss
+    if mass_loss_rate < 0:  # Mass is decreasing
+        characteristic_concentration = np.mean(data_processor.usol[:, :, 0])
+        boundary_length = 2 * (domain_info['spatial_bounds']['x'][1] - domain_info['spatial_bounds']['x'][0] +
+                              domain_info['spatial_bounds']['y'][1] - domain_info['spatial_bounds']['y'][0])
+        estimated_k = abs(mass_loss_rate) / (boundary_length * characteristic_concentration)
+        initial_k = max(estimated_k, 1e-6)
+        print(f"  Estimated initial k: {initial_k:.6e}")
+
+    # Create PINN config
     config = DiffusionConfig(
         diffusion_trainable=True,
         use_physics_loss=True
     )
 
-    # Initialize PINN with logarithmic parameterization
-    pinn = DiffusionPINN(
+    # Initialize open system PINN
+    pinn = OpenSystemDiffusionPINN(
         spatial_bounds=domain_info['spatial_bounds'],
         time_bounds=domain_info['time_bounds'],
         initial_D=initial_D,
+        initial_k=initial_k,
+        c_external=0.0,  # Assume external concentration is zero
         config=config,
-        seed=seed,
-        data_processor=data_processor
+        seed=seed
     )
 
-    # Prepare training data
-    training_data = data_processor.prepare_training_data(N_u, N_f, N_i, seed=seed)
+    # Prepare training data for open system
+    training_data = prepare_open_system_data(data_processor, N_u, N_f, N_i, seed)
 
     return pinn, training_data
 
-def compute_stable_interior_loss(pinn, x_interior, c_interior):
-    """Compute interior loss with stability enhancements"""
-    if x_interior.shape[0] == 0:
-        return tf.constant(0.0, dtype=tf.float32)
-
-    # Forward pass predictions
-    c_pred = pinn.forward_pass(x_interior)
-
-    # Calculate raw errors
-    raw_errors = c_pred - c_interior
-
-    # Apply Huber loss for robustness to outliers
-    delta = 0.1
-    abs_errors = tf.abs(raw_errors)
-    quadratic = tf.minimum(abs_errors, delta)
-    linear = abs_errors - quadratic
-
-    # Combine for final loss
-    return tf.reduce_mean(0.5 * quadratic * quadratic + delta * linear)
-
-def deterministic_train_pinn_log_d(pinn: 'DiffusionPINN',
-                                 data: Dict[str, tf.Tensor],
-                                 optimizer: tf.keras.optimizers.Optimizer,
-                                 epochs: int = 100,
-                                 save_dir: str = None,
-                                 checkpoint_frequency: int = 1000,
-                                 seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
-    """
-    Deterministic training with logarithmic D parameterization - UNBIASED VERSION
-    """
-    # Set random seeds if provided
+def prepare_open_system_data(data_processor, N_u: int, N_f: int, N_i: int, seed: int = None) -> Dict[str, tf.Tensor]:
+    """Prepare training data specifically for open system"""
     if seed is not None:
-        tf.random.set_seed(seed)
         np.random.seed(seed)
 
-    D_history = []
-    log_D_history = []
-    loss_history = []
+    print(f"Preparing open system training data:")
+    print(f"  N_u (boundary points): {N_u}")
+    print(f"  N_f (physics points): {N_f}")
+    print(f"  N_i (interior data): {N_i}")
 
-    # Enhanced training schedule for logarithmic parameterization
-    phase_configs = [
-        {
-            'name': 'Phase 1: Physics Learning (Log D)',
-            'epochs': epochs // 4,
-            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 0.5, 'physics': 10.0},
-            'lr_schedule': lambda epoch, total: 1e-3 * (0.95 ** (epoch // 100)),
-            'regularization': 0.001,
-            'description': 'Focus on learning physics with log(D) parameterization'
-        },
-        {
-            'name': 'Phase 2: Data Fitting (Log D)',
-            'epochs': epochs // 2,
-            'weights': {'initial': 1.0, 'boundary': 1.0, 'interior': 5.0, 'physics': 3.0},
-            'lr_schedule': lambda epoch, total: 5e-4 * (0.98 ** (epoch // 50)),
-            'regularization': 0.0005,
-            'description': 'Balance physics with data fitting using log(D)'
-        },
-        {
-            'name': 'Phase 3: Fine Tuning (Log D)',
-            'epochs': epochs // 4,
-            'weights': {'initial': 0.5, 'boundary': 0.5, 'interior': 10.0, 'physics': 1.0},
-            'lr_schedule': lambda epoch, total: 1e-4 * (0.99 ** (epoch // 25)),
-            'regularization': 0.0001,
-            'description': 'Fine-tune with emphasis on data accuracy'
-        }
-    ]
+    # Get all data points
+    all_coords, all_values = data_processor.get_boundary_and_interior_points()
 
-    epoch_counter = 0
-    convergence_history = []
+    # Separate initial condition data (t = t_min only)
+    t_min = data_processor.t.min()
+    initial_mask = np.abs(all_coords[:, 2] - t_min) < 1e-6
 
-    # Log(D) bounds for monitoring
-    log_D_min_monitor = -25.0
-    log_D_max_monitor = -1.0
+    initial_coords = all_coords[initial_mask]
+    initial_values = all_values[initial_mask]
 
-    print(f"\nStarting deterministic training with logarithmic D parameterization for {epochs} epochs")
-    print(f"Phase breakdown: {[phase['epochs'] for phase in phase_configs]} epochs")
+    print(f"  Initial condition points available: {len(initial_coords)}")
 
-    # Print initial state
-    initial_D = pinn.get_diffusion_coefficient()
-    initial_log_D = pinn.get_log_diffusion_coefficient()
-    print(f"Initial D: {initial_D:.8e}")
-    print(f"Initial log(D): {initial_log_D:.6f}")
+    # Subsample initial condition if needed
+    if len(initial_coords) > N_u:
+        if seed is not None:
+            np.random.seed(seed)
+        indices = np.random.choice(len(initial_coords), N_u, replace=False)
+        indices.sort()
+        X_u_train = initial_coords[indices]
+        u_train = initial_values[indices]
+    else:
+        X_u_train = initial_coords
+        u_train = initial_values
 
-    try:
-        for phase_idx, phase in enumerate(phase_configs):
-            print(f"\n{'='*60}")
-            print(f"{phase['name']} - {phase['epochs']} epochs")
-            print(f"Description: {phase['description']}")
-            print(f"Loss weights: {phase['weights']}")
-            print(f"{'='*60}")
+    print(f"  Using {len(X_u_train)} initial condition points")
 
-            phase_start_epoch = epoch_counter
+    # Generate physics points (interior + boundary) for all times
+    # These will be used to enforce PDE and boundary conditions
+    X_f_train = data_processor.create_deterministic_collocation_points(N_f, seed=seed)
 
-            for epoch in range(phase['epochs']):
-                # Deterministic learning rate
-                current_lr = phase['lr_schedule'](epoch, phase['epochs'])
+    # Add some points specifically on boundaries for Robin conditions
+    boundary_points = generate_boundary_physics_points(data_processor, N_f // 4, seed)
+    X_f_train = np.vstack([X_f_train, boundary_points])
 
-                # Set learning rate
-                if hasattr(optimizer, 'learning_rate'):
-                    if hasattr(optimizer.learning_rate, 'assign'):
-                        optimizer.learning_rate.assign(current_lr)
+    print(f"  Physics points (total): {len(X_f_train)}")
 
-                # Training step with logarithmic D
-                with tf.GradientTape() as tape:
-                    # Compute losses with fixed weights
-                    losses = pinn.loss_fn(
-                        x_data=data['X_u_train'],
-                        c_data=data['u_train'],
-                        x_physics=data['X_f_train'],
-                        weights=phase['weights']
-                    )
+    # Interior data points for additional supervision (optional, can be reduced)
+    non_initial_mask = ~initial_mask
+    if np.any(non_initial_mask) and N_i > 0:
+        non_initial_coords = all_coords[non_initial_mask]
+        non_initial_values = all_values[non_initial_mask]
 
-                    # Compute interior loss separately
-                    interior_loss = compute_stable_interior_loss(
-                        pinn, data['X_i_train'], data['u_i_train']
-                    )
-
-                    # L2 regularization on network weights
-                    l2_loss = phase['regularization'] * sum(
-                        tf.reduce_sum(tf.square(w)) for w in pinn.weights
-                    )
-
-                    # UNBIASED: Remove all log(D) regularization that creates bias
-                    log_d_reg = tf.constant(0.0, dtype=tf.float32)
-
-                    # Total loss calculation
-                    total_loss = (
-                        losses['total'] +
-                        interior_loss +
-                        l2_loss +
-                        log_d_reg
-                    )
-
-                    losses['total'] = total_loss
-                    losses['interior'] = interior_loss
-                    losses['l2_reg'] = l2_loss
-                    losses['log_d_reg_unbiased'] = log_d_reg
-
-                # Apply gradients with consistent clipping
-                trainable_vars = pinn.get_trainable_variables()
-                gradients = tape.gradient(total_loss, trainable_vars)
-
-                # Gradient clipping
-                gradients, global_norm = tf.clip_by_global_norm(gradients, 1.0)
-                optimizer.apply_gradients(zip(gradients, trainable_vars))
-
-                # Record history
-                current_D = pinn.get_diffusion_coefficient()
-                current_log_D = pinn.get_log_diffusion_coefficient()
-
-                D_history.append(current_D)
-                log_D_history.append(current_log_D)
-                loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
-
-                # Enhanced convergence checking for log(D)
-                if epoch_counter % 100 == 0:
-                    # Check convergence over last 50 epochs using log(D)
-                    if len(log_D_history) >= 50:
-                        recent_log_d = log_D_history[-50:]
-                        log_d_std = np.std(recent_log_d)
-                        log_d_mean = np.mean(recent_log_d)
-
-                        convergence_metric = log_d_std
-                        convergence_history.append(convergence_metric)
-
-                        print(f"Epoch {epoch_counter:5d}: D={current_D:.6e}, log(D)={current_log_D:.6f}, "
-                              f"Loss={losses['total']:.6f}, LR={current_lr:.2e}, "
-                              f"log(D)_std={convergence_metric:.6f}")
-
-                        # Convergence criteria
-                        if (convergence_metric < 0.01 and
-                            len(convergence_history) >= 3 and
-                            all(conv < 0.01 for conv in convergence_history[-3:])):
-                            print(f"Converged at epoch {epoch_counter} (log(D) std < 0.01)")
-
-                        # Warning for extreme values
-                        if current_log_D < log_D_min_monitor + 1.0:
-                            print(f"WARNING: log(D) approaching lower bound: {current_log_D:.6f}")
-                        elif current_log_D > log_D_max_monitor - 1.0:
-                            print(f"WARNING: log(D) approaching upper bound: {current_log_D:.6f}")
-
-                epoch_counter += 1
-
-                # Memory cleanup
-                if epoch_counter % 100 == 0:
-                    gc.collect()
-
-            # Phase completion summary
-            phase_final_D = D_history[-1]
-            phase_final_log_D = log_D_history[-1]
-            phase_final_loss = loss_history[-1]['total']
-            print(f"\nPhase {phase_idx + 1} completed:")
-            print(f"  Final D: {phase_final_D:.6e}")
-            print(f"  Final log(D): {phase_final_log_D:.6f}")
-            print(f"  Final Loss: {phase_final_loss:.6f}")
-            print(f"  Epochs: {phase_start_epoch} to {epoch_counter-1}")
-
-            # Save checkpoint after each phase
-            if save_dir:
-                save_checkpoint_log_d(pinn, save_dir, f"phase_{phase_idx+1}_final",
-                                     log_D_history, D_history)
-
-        # Final training summary
-        final_D = D_history[-1]
-        final_log_D = log_D_history[-1]
-        final_loss = loss_history[-1]['total']
-
-        print(f"\n{'='*60}")
-        print("LOGARITHMIC D TRAINING COMPLETED")
-        print(f"{'='*60}")
-        print(f"Total epochs: {epoch_counter}")
-        print(f"Final diffusion coefficient: {final_D:.8e}")
-        print(f"Final log(D): {final_log_D:.6f}")
-        print(f"Final loss: {final_loss:.6f}")
-
-        # Enhanced prediction range test
-        test_points = tf.constant([
-            [0.0, 0.0, 0.0],
-            [0.5, 0.5, 2.5],
-            [1.0, 1.0, 5.0]
-        ], dtype=tf.float32)
-
-        test_preds = pinn.predict(test_points)
-        pred_range = tf.reduce_max(test_preds) - tf.reduce_min(test_preds)
-
-        print(f"Prediction range test: {pred_range.numpy():.6f}")
-        if pred_range < 1e-6:
-            print("WARNING: Still predicting uniform values!")
+        if len(non_initial_coords) > N_i:
+            if seed is not None:
+                np.random.seed(seed + 1)
+            indices = np.random.choice(len(non_initial_coords), N_i, replace=False)
+            indices.sort()
+            X_i_train = non_initial_coords[indices]
+            u_i_train = non_initial_values[indices]
         else:
-            print("SUCCESS: Network predicting varying values!")
+            X_i_train = non_initial_coords
+            u_i_train = non_initial_values
+    else:
+        X_i_train = np.empty((0, 3))
+        u_i_train = np.empty((0, 1))
 
-        # Check final convergence using log(D)
-        if len(log_D_history) >= 100:
-            recent_log_d = log_D_history[-100:]
-            final_log_d_std = np.std(recent_log_d)
-            print(f"Final log(D) convergence metric: {final_log_d_std:.6f}")
-            print(f"Converged: {'Yes' if final_log_d_std < 0.05 else 'No'}")
+    print(f"  Interior supervision points: {len(X_i_train)}")
 
-        # Log(D) training statistics
-        log_d_range = max(log_D_history) - min(log_D_history)
-        print(f"log(D) exploration range: {log_d_range:.6f}")
-        print(f"D exploration range: {max(D_history):.2e} to {min(D_history):.2e}")
+    # Convert to tensors
+    training_data = {
+        'X_u_train': tf.convert_to_tensor(X_u_train, dtype=tf.float32),
+        'u_train': tf.convert_to_tensor(u_train, dtype=tf.float32),
+        'X_i_train': tf.convert_to_tensor(X_i_train, dtype=tf.float32),
+        'u_i_train': tf.convert_to_tensor(u_i_train, dtype=tf.float32),
+        'X_f_train': tf.convert_to_tensor(X_f_train, dtype=tf.float32),
+        # Test data for evaluation
+        'X_u_test': tf.convert_to_tensor(data_processor.X_u_test, dtype=tf.float32),
+        'u_test': tf.convert_to_tensor(data_processor.u, dtype=tf.float32)
+    }
 
-        # Save final model
-        if save_dir:
-            save_checkpoint_log_d(pinn, save_dir, "final_log_d", log_D_history, D_history)
+    return training_data
 
-    except KeyboardInterrupt:
-        print("\nTraining interrupted!")
-    except Exception as e:
-        print(f"\nError during training: {str(e)}")
-        import traceback
-        traceback.print_exc()
+def generate_boundary_physics_points(data_processor, n_points: int, seed: int = None) -> np.ndarray:
+    """Generate points specifically on boundaries for Robin condition enforcement"""
+    if seed is not None:
+        np.random.seed(seed + 2)
 
-    return D_history, loss_history
+    x_bounds = [data_processor.x.min(), data_processor.x.max()]
+    y_bounds = [data_processor.y.min(), data_processor.y.max()]
+    t_bounds = [data_processor.t.min(), data_processor.t.max()]
 
-def deterministic_train_pinn(pinn: 'DiffusionPINN',
-                           data: Dict[str, tf.Tensor],
-                           optimizer: tf.keras.optimizers.Optimizer,
-                           epochs: int = 100,
-                           save_dir: str = None,
-                           checkpoint_frequency: int = 1000,
-                           seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
-    """
-    Standard deterministic training (fallback for non-logarithmic PINNs)
-    """
-    # Set random seeds if provided
+    boundary_points = []
+    points_per_boundary = n_points // 4
+
+    # Generate time and one spatial coordinate randomly
+    t_vals = np.random.uniform(t_bounds[0], t_bounds[1], points_per_boundary * 4)
+
+    # X boundaries (x = x_min, x = x_max)
+    y_vals_x = np.random.uniform(y_bounds[0], y_bounds[1], points_per_boundary * 2)
+
+    # x = x_min boundary
+    x_min_points = np.column_stack([
+        np.full(points_per_boundary, x_bounds[0]),
+        y_vals_x[:points_per_boundary],
+        t_vals[:points_per_boundary]
+    ])
+
+    # x = x_max boundary
+    x_max_points = np.column_stack([
+        np.full(points_per_boundary, x_bounds[1]),
+        y_vals_x[points_per_boundary:2*points_per_boundary],
+        t_vals[points_per_boundary:2*points_per_boundary]
+    ])
+
+    # Y boundaries (y = y_min, y = y_max)
+    x_vals_y = np.random.uniform(x_bounds[0], x_bounds[1], points_per_boundary * 2)
+
+    # y = y_min boundary
+    y_min_points = np.column_stack([
+        x_vals_y[:points_per_boundary],
+        np.full(points_per_boundary, y_bounds[0]),
+        t_vals[2*points_per_boundary:3*points_per_boundary]
+    ])
+
+    # y = y_max boundary
+    y_max_points = np.column_stack([
+        x_vals_y[points_per_boundary:],
+        np.full(points_per_boundary, y_bounds[1]),
+        t_vals[3*points_per_boundary:4*points_per_boundary]
+    ])
+
+    boundary_points = np.vstack([x_min_points, x_max_points, y_min_points, y_max_points])
+
+    return boundary_points
+
+def train_open_system_pinn(pinn: 'OpenSystemDiffusionPINN',
+                          data: Dict[str, tf.Tensor],
+                          optimizer: tf.keras.optimizers.Optimizer,
+                          epochs: int = 100,
+                          save_dir: str = None,
+                          seed: int = None) -> Tuple[List[float], List[float], List[Dict[str, float]]]:
+    """Train open system PINN with proper phase scheduling"""
     if seed is not None:
         tf.random.set_seed(seed)
         np.random.seed(seed)
 
     D_history = []
+    k_history = []  # Track boundary permeability
     loss_history = []
 
-    # Standard training schedule
+    # Multi-phase training for open system
     phase_configs = [
         {
-            'name': 'Phase 1: Physics Learning',
-            'epochs': epochs // 4,
-            'weights': {'initial': 2.0, 'boundary': 2.0, 'interior': 0.5, 'physics': 10.0},
-            'lr_schedule': lambda epoch, total: 1e-3 * (0.95 ** (epoch // 100)),
-            'regularization': 0.001,
-            'description': 'Focus on learning physics constraints'
+            'name': 'Phase 1: Initial Condition Learning',
+            'epochs': epochs // 6,
+            'weights': {'initial': 100.0, 'boundary': 0.1, 'interior': 0.1},
+            'lr_schedule': lambda epoch, total: 1e-3,
+            'description': 'Focus on fitting initial condition accurately'
         },
         {
-            'name': 'Phase 2: Data Fitting',
-            'epochs': epochs // 2,
-            'weights': {'initial': 1.0, 'boundary': 1.0, 'interior': 5.0, 'physics': 3.0},
-            'lr_schedule': lambda epoch, total: 5e-4 * (0.98 ** (epoch // 50)),
-            'regularization': 0.0005,
-            'description': 'Balance physics with data fitting'
+            'name': 'Phase 2: Boundary Physics Introduction',
+            'epochs': epochs // 6,
+            'weights': {'initial': 10.0, 'boundary': 10.0, 'interior': 1.0},
+            'lr_schedule': lambda epoch, total: 5e-4,
+            'description': 'Introduce Robin boundary conditions gradually'
         },
         {
-            'name': 'Phase 3: Fine Tuning',
+            'name': 'Phase 3: Interior Physics',
+            'epochs': epochs // 3,
+            'weights': {'initial': 5.0, 'boundary': 5.0, 'interior': 15.0},
+            'lr_schedule': lambda epoch, total: 2e-4 * (0.95 ** (epoch // 50)),
+            'description': 'Balance all physics components'
+        },
+        {
+            'name': 'Phase 4: Fine-tuning',
             'epochs': epochs // 4,
-            'weights': {'initial': 0.5, 'boundary': 0.5, 'interior': 10.0, 'physics': 1.0},
-            'lr_schedule': lambda epoch, total: 1e-4 * (0.99 ** (epoch // 25)),
-            'regularization': 0.0001,
-            'description': 'Fine-tune with emphasis on data accuracy'
+            'weights': {'initial': 1.0, 'boundary': 10.0, 'interior': 10.0},
+            'lr_schedule': lambda epoch, total: 1e-4 * (0.98 ** (epoch // 25)),
+            'description': 'Fine-tune with emphasis on boundary physics'
         }
     ]
 
     epoch_counter = 0
     convergence_history = []
 
-    # Define acceptable range for diffusion coefficient
-    D_min = 1e-6
-    D_max = 1e-2
+    print(f"\nStarting open system training for {epochs} epochs")
+    print(f"Learning parameters: D (diffusion), k (boundary permeability)")
 
-    print(f"\nStarting deterministic training for {epochs} epochs")
-    print(f"Phase breakdown: {[phase['epochs'] for phase in phase_configs]} epochs")
+    # Print initial parameters
+    initial_D = pinn.get_diffusion_coefficient()
+    initial_k = pinn.get_boundary_permeability()
+    print(f"Initial D: {initial_D:.6e}")
+    print(f"Initial k: {initial_k:.6e}")
 
     try:
         for phase_idx, phase in enumerate(phase_configs):
@@ -386,7 +275,6 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
             phase_start_epoch = epoch_counter
 
             for epoch in range(phase['epochs']):
-                # Deterministic learning rate
                 current_lr = phase['lr_schedule'](epoch, phase['epochs'])
 
                 # Set learning rate
@@ -396,7 +284,7 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
 
                 # Training step
                 with tf.GradientTape() as tape:
-                    # Compute losses with fixed weights
+                    # Compute losses with current phase weights
                     losses = pinn.loss_fn(
                         x_data=data['X_u_train'],
                         c_data=data['u_train'],
@@ -404,55 +292,54 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
                         weights=phase['weights']
                     )
 
-                    # Compute interior loss separately
-                    interior_loss = compute_stable_interior_loss(
-                        pinn, data['X_i_train'], data['u_i_train']
-                    )
-
-                    # L2 regularization
-                    l2_loss = phase['regularization'] * sum(
-                        tf.reduce_sum(tf.square(w)) for w in pinn.weights
-                    )
-
-                    # UNBIASED: Remove diffusion coefficient bias regularization
-                    d_reg = tf.constant(0.0, dtype=tf.float32)
-
-                    # Total loss calculation
-                    total_loss = (
-                        losses['total'] +
-                        l2_loss +
-                        d_reg
-                    )
-
-                    losses['total'] = total_loss
-                    losses['interior'] = interior_loss
-                    losses['l2_reg'] = l2_loss
-                    losses['d_reg'] = d_reg
+                    # Add interior supervision if available
+                    if data['X_i_train'].shape[0] > 0:
+                        interior_pred = pinn.forward_pass(data['X_i_train'])
+                        interior_loss = tf.reduce_mean(tf.square(interior_pred - data['u_i_train']))
+                        losses['interior_data'] = interior_loss
+                        losses['total'] += 0.1 * interior_loss
 
                 # Apply gradients
                 trainable_vars = pinn.get_trainable_variables()
-                gradients = tape.gradient(total_loss, trainable_vars)
+                gradients = tape.gradient(losses['total'], trainable_vars)
 
-                # Gradient clipping
+                # Gradient clipping for stability
                 gradients, global_norm = tf.clip_by_global_norm(gradients, 1.0)
                 optimizer.apply_gradients(zip(gradients, trainable_vars))
 
                 # Record history
                 current_D = pinn.get_diffusion_coefficient()
+                current_k = pinn.get_boundary_permeability()
+
                 D_history.append(current_D)
+                k_history.append(current_k)
                 loss_history.append({k: float(v.numpy()) for k, v in losses.items()})
 
-                # Convergence checking
+                # Progress reporting
                 if epoch_counter % 100 == 0:
+                    print(f"Epoch {epoch_counter:5d}: D={current_D:.6e}, k={current_k:.6e}, "
+                          f"Loss={losses['total']:.6f}, LR={current_lr:.2e}")
+
+                    # Check convergence
                     if len(D_history) >= 50:
-                        recent_d = D_history[-50:]
-                        d_std = np.std(recent_d)
-                        d_mean = np.mean(recent_d)
-                        relative_std = d_std / d_mean if d_mean > 0 else float('inf')
-                        convergence_history.append(relative_std)
-                        print(f"Epoch {epoch_counter:5d}: D={current_D:.6f}, "
-                              f"Loss={losses['total']:.6f}, LR={current_lr:.2e}, "
-                              f"RelStd={relative_std:.6f}")
+                        recent_D = D_history[-50:]
+                        recent_k = k_history[-50:]
+                        D_std = np.std(recent_D)
+                        k_std = np.std(recent_k)
+                        D_mean = np.mean(recent_D)
+                        k_mean = np.mean(recent_k)
+
+                        D_rel_std = D_std / D_mean if D_mean > 0 else float('inf')
+                        k_rel_std = k_std / k_mean if k_mean > 0 else float('inf')
+
+                        convergence_metric = max(D_rel_std, k_rel_std)
+                        convergence_history.append(convergence_metric)
+
+                        print(f"  D rel_std: {D_rel_std:.6f}, k rel_std: {k_rel_std:.6f}")
+
+                        # Mass conservation check
+                        if epoch_counter % 500 == 0:
+                            check_mass_balance(pinn, data, epoch_counter)
 
                 epoch_counter += 1
 
@@ -460,31 +347,68 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
                 if epoch_counter % 100 == 0:
                     gc.collect()
 
-            # Phase completion summary
+            # Phase summary
             phase_final_D = D_history[-1]
+            phase_final_k = k_history[-1]
             phase_final_loss = loss_history[-1]['total']
+
             print(f"\nPhase {phase_idx + 1} completed:")
-            print(f"  Final D: {phase_final_D:.6f}")
+            print(f"  Final D: {phase_final_D:.6e}")
+            print(f"  Final k: {phase_final_k:.6e}")
             print(f"  Final Loss: {phase_final_loss:.6f}")
 
-            # Save checkpoint after each phase
+            # Save checkpoint
             if save_dir:
-                save_checkpoint(pinn, save_dir, f"phase_{phase_idx+1}_final")
+                save_open_system_checkpoint(pinn, save_dir, f"phase_{phase_idx+1}",
+                                           D_history, k_history)
 
         # Final training summary
         final_D = D_history[-1]
+        final_k = k_history[-1]
         final_loss = loss_history[-1]['total']
 
         print(f"\n{'='*60}")
-        print("DETERMINISTIC TRAINING COMPLETED")
+        print("OPEN SYSTEM TRAINING COMPLETED")
         print(f"{'='*60}")
         print(f"Total epochs: {epoch_counter}")
-        print(f"Final diffusion coefficient: {final_D:.8f}")
+        print(f"Final diffusion coefficient: {final_D:.8e}")
+        print(f"Final boundary permeability: {final_k:.8e}")
         print(f"Final loss: {final_loss:.6f}")
+
+        # Physical interpretation
+        characteristic_time_diffusion = 1.0 / final_D  # Rough estimate
+        characteristic_time_outflow = 1.0 / final_k
+
+        print(f"\nPhysical Interpretation:")
+        print(f"  Diffusion time scale: ~{characteristic_time_diffusion:.1f} time units")
+        print(f"  Outflow time scale: ~{characteristic_time_outflow:.1f} time units")
+
+        if characteristic_time_outflow < characteristic_time_diffusion:
+            print("  System is outflow-dominated (fast boundary loss)")
+        else:
+            print("  System is diffusion-dominated (slow boundary loss)")
+
+        # Final mass balance check
+        print(f"\nFinal mass balance check:")
+        check_mass_balance(pinn, data, epoch_counter)
+
+        # Convergence assessment
+        if len(D_history) >= 100:
+            recent_D = D_history[-100:]
+            recent_k = k_history[-100:]
+            final_D_std = np.std(recent_D) / np.mean(recent_D)
+            final_k_std = np.std(recent_k) / np.mean(recent_k)
+
+            print(f"Final convergence metrics:")
+            print(f"  D relative std: {final_D_std:.6f}")
+            print(f"  k relative std: {final_k_std:.6f}")
+
+            converged = (final_D_std < 0.05 and final_k_std < 0.05)
+            print(f"  Converged: {'Yes' if converged else 'No'}")
 
         # Save final model
         if save_dir:
-            save_checkpoint(pinn, save_dir, "final_deterministic")
+            save_open_system_checkpoint(pinn, save_dir, "final", D_history, k_history)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
@@ -493,180 +417,68 @@ def deterministic_train_pinn(pinn: 'DiffusionPINN',
         import traceback
         traceback.print_exc()
 
-    return D_history, loss_history
+    return D_history, k_history, loss_history
 
-def train_pinn(pinn: 'DiffusionPINN',
-              data: Dict[str, tf.Tensor],
-              optimizer: tf.keras.optimizers.Optimizer,
-              epochs: int = 100,
-              save_dir: str = None,
-              checkpoint_frequency: int = 1000,
-              seed: int = None) -> Tuple[List[float], List[Dict[str, float]]]:
-    """
-    Main training function - uses logarithmic D training if PINN has log_D attribute
-    """
-    # Check if this PINN uses logarithmic parameterization
-    if hasattr(pinn, 'log_D'):
-        print("Detected logarithmic D parameterization - using enhanced training...")
-        return deterministic_train_pinn_log_d(
-            pinn=pinn,
-            data=data,
-            optimizer=optimizer,
-            epochs=epochs,
-            save_dir=save_dir,
-            checkpoint_frequency=checkpoint_frequency,
-            seed=seed
-        )
-    else:
-        print("Using standard deterministic training...")
-        return deterministic_train_pinn(
-            pinn=pinn,
-            data=data,
-            optimizer=optimizer,
-            epochs=epochs,
-            save_dir=save_dir,
-            checkpoint_frequency=checkpoint_frequency,
-            seed=seed
-        )
+def check_mass_balance(pinn: 'OpenSystemDiffusionPINN', data: Dict[str, tf.Tensor], epoch: int):
+    """Check if the learned physics conserves mass properly"""
+    # Sample some test points
+    n_test = 1000
+    x_test = tf.random.uniform((n_test, 3), dtype=tf.float32)
+    x_test = x_test * (pinn.ub - pinn.lb) + pinn.lb
 
-def save_checkpoint_log_d(pinn: 'DiffusionPINN', save_dir: str, epoch: str,
-                         log_D_history: List[float], D_history: List[float]) -> None:
-    """Save model checkpoint with log(D) information"""
+    # Compute predicted concentrations
+    c_pred = pinn.forward_pass(x_test)
+
+    # Compute total "mass" in domain (rough approximation)
+    mean_concentration = tf.reduce_mean(c_pred)
+
+    print(f"  Epoch {epoch}: Mean predicted concentration = {mean_concentration:.6f}")
+
+def save_open_system_checkpoint(pinn: 'OpenSystemDiffusionPINN', save_dir: str,
+                               epoch: str, D_history: List[float], k_history: List[float]):
+    """Save checkpoint with both D and k histories"""
     os.makedirs(save_dir, exist_ok=True)
 
-    # Save enhanced configuration including log(D) information
+    # Save configuration including new parameters
     config_dict = {
         'hidden_layers': pinn.config.hidden_layers,
         'activation': pinn.config.activation,
-        'initialization': pinn.config.initialization,
-        'diffusion_trainable': pinn.config.diffusion_trainable,
-        'use_physics_loss': pinn.config.use_physics_loss,
         'spatial_bounds': {
             'x': [float(pinn.x_bounds[0]), float(pinn.x_bounds[1])],
             'y': [float(pinn.y_bounds[0]), float(pinn.y_bounds[1])]
         },
         'time_bounds': [float(pinn.t_bounds[0]), float(pinn.t_bounds[1])],
         'D_value': float(pinn.get_diffusion_coefficient()),
-        'log_D_value': float(pinn.get_log_diffusion_coefficient()),
+        'k_value': float(pinn.get_boundary_permeability()),
+        'c_external': float(pinn.get_external_concentration()),
         'log_D_bounds': [float(pinn.log_D_min), float(pinn.log_D_max)],
-        'parameterization': 'logarithmic'
+        'log_k_bounds': [float(pinn.log_k_min), float(pinn.log_k_max)],
+        'parameterization': 'open_system_logarithmic',
+        'model_type': 'OpenSystemDiffusionPINN'
     }
 
     with open(os.path.join(save_dir, f'config_{epoch}.json'), 'w') as f:
         json.dump(config_dict, f, indent=4)
 
-    # Save weights and biases
-    weights_dict = {f'weight_{i}': w.numpy().tolist()
-                   for i, w in enumerate(pinn.weights)}
-    biases_dict = {f'bias_{i}': b.numpy().tolist()
-                   for i, b in enumerate(pinn.biases)}
-
-    with open(os.path.join(save_dir, f'weights_{epoch}.json'), 'w') as f:
-        json.dump(weights_dict, f)
-    with open(os.path.join(save_dir, f'biases_{epoch}.json'), 'w') as f:
-        json.dump(biases_dict, f)
-
-    # Save log(D) history for analysis
-    log_d_history_dict = {
-        'log_D_history': log_D_history,
+    # Save parameter histories
+    history_dict = {
         'D_history': D_history,
+        'k_history': k_history,
         'final_D': float(pinn.get_diffusion_coefficient()),
-        'final_log_D': float(pinn.get_log_diffusion_coefficient())
+        'final_k': float(pinn.get_boundary_permeability()),
+        'epochs': len(D_history)
     }
 
-    with open(os.path.join(save_dir, f'log_d_history_{epoch}.json'), 'w') as f:
-        json.dump(log_d_history_dict, f, indent=4)
+    with open(os.path.join(save_dir, f'parameter_history_{epoch}.json'), 'w') as f:
+        json.dump(history_dict, f, indent=4)
 
-def save_checkpoint(pinn: 'DiffusionPINN', save_dir: str, epoch: str) -> None:
-    """
-    Save model checkpoint (standard version)
-
-    Args:
-        pinn: PINN model to save
-        save_dir: Directory to save checkpoint
-        epoch: Epoch identifier
-    """
-    os.makedirs(save_dir, exist_ok=True)
-
-    # Save configuration
-    config_dict = {
-        'hidden_layers': pinn.config.hidden_layers,
-        'activation': pinn.config.activation,
-        'initialization': pinn.config.initialization,
-        'diffusion_trainable': pinn.config.diffusion_trainable,
-        'use_physics_loss': pinn.config.use_physics_loss,
-        'spatial_bounds': {
-            'x': [float(pinn.x_bounds[0]), float(pinn.x_bounds[1])],
-            'y': [float(pinn.y_bounds[0]), float(pinn.y_bounds[1])]
-        },
-        'time_bounds': [float(pinn.t_bounds[0]), float(pinn.t_bounds[1])],
-        'D_value': float(pinn.get_diffusion_coefficient())
-    }
-
-    # Add log_D info if available
-    if hasattr(pinn, 'log_D'):
-        config_dict['log_D_value'] = float(pinn.get_log_diffusion_coefficient())
-        config_dict['log_D_bounds'] = [float(pinn.log_D_min), float(pinn.log_D_max)]
-        config_dict['parameterization'] = 'logarithmic'
-    else:
-        config_dict['parameterization'] = 'standard'
-
-    with open(os.path.join(save_dir, f'config_{epoch}.json'), 'w') as f:
-        json.dump(config_dict, f, indent=4)
-
-    # Save weights and biases
-    weights_dict = {f'weight_{i}': w.numpy().tolist()
-                   for i, w in enumerate(pinn.weights)}
-    biases_dict = {f'bias_{i}': b.numpy().tolist()
-                   for i, b in enumerate(pinn.biases)}
+    # Save network weights
+    weights_dict = {f'weight_{i}': w.numpy().tolist() for i, w in enumerate(pinn.weights)}
+    biases_dict = {f'bias_{i}': b.numpy().tolist() for i, b in enumerate(pinn.biases)}
 
     with open(os.path.join(save_dir, f'weights_{epoch}.json'), 'w') as f:
         json.dump(weights_dict, f)
     with open(os.path.join(save_dir, f'biases_{epoch}.json'), 'w') as f:
         json.dump(biases_dict, f)
 
-def load_pretrained_pinn(load_dir: str, data_path: str) -> Tuple['DiffusionPINN', 'DiffusionDataProcessor']:
-    """
-    Load a pretrained PINN model
-
-    Args:
-        load_dir: Directory containing saved model
-        data_path: Path to data file
-
-    Returns:
-        Tuple of (loaded PINN, data processor)
-    """
-    from ..data.processor import DiffusionDataProcessor
-    from ..models.pinn import DiffusionPINN
-    from ..config import DiffusionConfig
-
-    with open(os.path.join(load_dir, 'config.json'), 'r') as f:
-        config_dict = json.load(f)
-
-    data_processor = DiffusionDataProcessor(data_path, normalize_spatial=True)
-
-    config = DiffusionConfig(
-        hidden_layers=config_dict['hidden_layers'],
-        activation=config_dict['activation'],
-        initialization=config_dict['initialization'],
-        diffusion_trainable=config_dict['diffusion_trainable'],
-        use_physics_loss=config_dict['use_physics_loss']
-    )
-
-    pinn = DiffusionPINN(
-        spatial_bounds=config_dict['spatial_bounds'],
-        time_bounds=tuple(config_dict['time_bounds']),
-        initial_D=config_dict['D_value'],
-        config=config
-    )
-
-    with open(os.path.join(load_dir, 'weights.json'), 'r') as f:
-        weights_dict = json.load(f)
-    with open(os.path.join(load_dir, 'biases.json'), 'r') as f:
-        biases_dict = json.load(f)
-
-    for i in range(len(pinn.weights)):
-        pinn.weights[i].assign(weights_dict[f'weight_{i}'])
-        pinn.biases[i].assign(biases_dict[f'bias_{i}'])
-
-    return pinn, data_processor
+    print(f"Checkpoint saved: {save_dir}/config_{epoch}.json")
