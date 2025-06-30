@@ -1,5 +1,8 @@
 # src/diffusion_pinn/models/__init__.py
 
-from .pinn import DiffusionPINN, OpenSystemDiffusionPINN
+from .pinn import OpenSystemDiffusionPINN
 
-__all__ = ['DiffusionPINN', 'OpenSystemDiffusionPINN']
+# Keep old name for backward compatibility during transition
+DiffusionPINN = OpenSystemDiffusionPINN  # Alias for compatibility
+
+__all__ = ['OpenSystemDiffusionPINN', 'DiffusionPINN']

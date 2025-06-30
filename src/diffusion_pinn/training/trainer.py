@@ -337,10 +337,6 @@ def train_open_system_pinn(pinn: 'OpenSystemDiffusionPINN',
 
                         print(f"  D rel_std: {D_rel_std:.6f}, k rel_std: {k_rel_std:.6f}")
 
-                        # Mass conservation check
-                        if epoch_counter % 500 == 0:
-                            check_mass_balance(pinn, data, epoch_counter)
-
                 epoch_counter += 1
 
                 # Memory cleanup
@@ -388,24 +384,6 @@ def train_open_system_pinn(pinn: 'OpenSystemDiffusionPINN',
         else:
             print("  System is diffusion-dominated (slow boundary loss)")
 
-        # Final mass balance check
-        print(f"\nFinal mass balance check:")
-        check_mass_balance(pinn, data, epoch_counter)
-
-        # Convergence assessment
-        if len(D_history) >= 100:
-            recent_D = D_history[-100:]
-            recent_k = k_history[-100:]
-            final_D_std = np.std(recent_D) / np.mean(recent_D)
-            final_k_std = np.std(recent_k) / np.mean(recent_k)
-
-            print(f"Final convergence metrics:")
-            print(f"  D relative std: {final_D_std:.6f}")
-            print(f"  k relative std: {final_k_std:.6f}")
-
-            converged = (final_D_std < 0.05 and final_k_std < 0.05)
-            print(f"  Converged: {'Yes' if converged else 'No'}")
-
         # Save final model
         if save_dir:
             save_open_system_checkpoint(pinn, save_dir, "final", D_history, k_history)
@@ -418,21 +396,6 @@ def train_open_system_pinn(pinn: 'OpenSystemDiffusionPINN',
         traceback.print_exc()
 
     return D_history, k_history, loss_history
-
-def check_mass_balance(pinn: 'OpenSystemDiffusionPINN', data: Dict[str, tf.Tensor], epoch: int):
-    """Check if the learned physics conserves mass properly"""
-    # Sample some test points
-    n_test = 1000
-    x_test = tf.random.uniform((n_test, 3), dtype=tf.float32)
-    x_test = x_test * (pinn.ub - pinn.lb) + pinn.lb
-
-    # Compute predicted concentrations
-    c_pred = pinn.forward_pass(x_test)
-
-    # Compute total "mass" in domain (rough approximation)
-    mean_concentration = tf.reduce_mean(c_pred)
-
-    print(f"  Epoch {epoch}: Mean predicted concentration = {mean_concentration:.6f}")
 
 def save_open_system_checkpoint(pinn: 'OpenSystemDiffusionPINN', save_dir: str,
                                epoch: str, D_history: List[float], k_history: List[float]):
@@ -482,3 +445,15 @@ def save_open_system_checkpoint(pinn: 'OpenSystemDiffusionPINN', save_dir: str,
         json.dump(biases_dict, f)
 
     print(f"Checkpoint saved: {save_dir}/config_{epoch}.json")
+
+# Keep some old functions for backward compatibility during transition
+def train_pinn(*args, **kwargs):
+    """Backward compatibility wrapper"""
+    print("WARNING: train_pinn() is deprecated. Use train_open_system_pinn() instead.")
+    # You could implement a wrapper here if needed
+    raise NotImplementedError("Use train_open_system_pinn() for open system physics")
+
+def create_and_initialize_pinn(*args, **kwargs):
+    """Backward compatibility wrapper"""
+    print("WARNING: create_and_initialize_pinn() is deprecated. Use create_open_system_pinn() instead.")
+    raise NotImplementedError("Use create_open_system_pinn() for open system physics")
