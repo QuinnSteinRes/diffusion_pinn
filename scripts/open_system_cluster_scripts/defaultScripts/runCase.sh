@@ -26,6 +26,9 @@ echo "Node: $HOSTNAME"
 # Source environment
 conda activate tbnn
 
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+export LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6"
+
 echo "Environment check:"
 echo "Python: $(which python)"
 echo "Python version: $(python --version)"
