@@ -24,6 +24,10 @@ PINN_VARIABLES = {
         'physics': 0.0                  # Was 5.0 - DISABLE
     },
 
+    # Keep these the same
+    'initial_D': 0.0001,
+    'initial_k': 0.001,
+
     # Open system specific parameters
     'c_external': 0.0,                       # External concentration (usually 0)
     'boundary_flux_weight': 1.0,             # Weight for Robin boundary terms
