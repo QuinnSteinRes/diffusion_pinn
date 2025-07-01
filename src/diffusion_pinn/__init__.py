@@ -8,7 +8,7 @@ from .variables import PINN_VARIABLES
 # Backward compatibility alias
 DiffusionPINN = OpenSystemDiffusionPINN
 
-__version__ = '0.3.0'
+__version__ = '0.3.1'
 
 # Base components that should always be available
 __all__ = [

@@ -62,14 +62,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Use open system scripts
-SCRIPT_SRC="$SOURCE_DIR/open_system_scripts"
+SCRIPT_SRC="$SOURCE_DIR/open_system_cluster_scripts"
 
 # Check if source directory exists
 if [ ! -d "$SCRIPT_SRC" ]; then
     echo "Error: Open system script directory $SCRIPT_SRC does not exist!"
     echo "Expected structure:"
-    echo "  $SOURCE_DIR/open_system_scripts/defaultScripts/"
-    echo "  $SOURCE_DIR/open_system_scripts/multiCase.sh"
+    echo "  $SOURCE_DIR/open_system_cluster_scripts/defaultScripts/"
+    echo "  $SOURCE_DIR/open_system_cluster_scripts/multiCase.sh"
     echo ""
     echo "You need to create this directory with the new open system scripts."
     exit 1
@@ -103,8 +103,8 @@ cp "$SCRIPT_SRC/multiCase.sh" "$DEST_DIR/"
 echo "Adding open system post-processing..."
 if [ -f "$POST_PROCESS_DIR/create_scripts.sh" ]; then
     # Use the new open system post-processing
-    cp "$POST_PROCESS_DIR/create_scripts.sh" "$DEST_DIR/create_open_system_scripts.sh"
-    chmod +x "$DEST_DIR/create_open_system_scripts.sh"
+    cp "$POST_PROCESS_DIR/create_scripts.sh" "$DEST_DIR/create_open_system_cluster_scripts.sh"
+    chmod +x "$DEST_DIR/create_open_system_cluster_scripts.sh"
     echo "Open system post-processing script added."
 else
     echo "Warning: Post-processing script not found at $POST_PROCESS_DIR"
@@ -177,8 +177,8 @@ This directory contains scripts for training an **Open System Physics-Informed N
 
 2. **Post-process results** (after training completes):
    \`\`\`bash
-   ./create_open_system_scripts.sh
-   ./run_open_system_analysis.sh
+   ./create_open_system_cluster_scripts.sh
+   ./run_open_system_cluster_analysis.sh
    \`\`\`
 
 ## Expected Outputs
@@ -217,8 +217,8 @@ echo "cd $DEST_DIR"
 echo "./multiCase.sh"
 echo ""
 echo "For post-processing after training:"
-echo "./create_open_system_scripts.sh"
-echo "./run_open_system_analysis.sh"
+echo "./create_open_system_cluster_scripts.sh"
+echo "./run_open_system_cluster_analysis.sh"
 echo ""
 echo "CRITICAL: This uses OpenSystemDiffusionPINN - completely different from your old model!"
 echo "Results will NOT be comparable to any previous closed-system analysis."

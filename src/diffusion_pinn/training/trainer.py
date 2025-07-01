@@ -223,32 +223,25 @@ def train_open_system_pinn(pinn: 'OpenSystemDiffusionPINN',
     # Multi-phase training for open system
     phase_configs = [
         {
-            'name': 'Phase 1: Initial Condition Learning',
-            'epochs': epochs // 6,
-            'weights': {'initial': 100.0, 'boundary': 0.1, 'interior': 0.1},
+            'name': 'Phase 1: PURE Data Fitting',
+            'epochs': epochs // 2,           # Half the epochs
+            'weights': {'initial': 1000.0, 'boundary': 0.0, 'interior': 100.0, 'physics': 0.0},
             'lr_schedule': lambda epoch, total: 1e-3,
-            'description': 'Focus on fitting initial condition accurately'
+            'description': 'ONLY fit data - no physics'
         },
         {
-            'name': 'Phase 2: Boundary Physics Introduction',
-            'epochs': epochs // 6,
-            'weights': {'initial': 10.0, 'boundary': 10.0, 'interior': 1.0},
-            'lr_schedule': lambda epoch, total: 5e-4,
-            'description': 'Introduce Robin boundary conditions gradually'
-        },
-        {
-            'name': 'Phase 3: Interior Physics',
-            'epochs': epochs // 3,
-            'weights': {'initial': 5.0, 'boundary': 5.0, 'interior': 15.0},
-            'lr_schedule': lambda epoch, total: 2e-4 * (0.95 ** (epoch // 50)),
-            'description': 'Balance all physics components'
-        },
-        {
-            'name': 'Phase 4: Fine-tuning',
+            'name': 'Phase 2: Add Minimal Physics',
             'epochs': epochs // 4,
-            'weights': {'initial': 1.0, 'boundary': 10.0, 'interior': 10.0},
-            'lr_schedule': lambda epoch, total: 1e-4 * (0.98 ** (epoch // 25)),
-            'description': 'Fine-tune with emphasis on boundary physics'
+            'weights': {'initial': 100.0, 'boundary': 0.1, 'interior': 50.0, 'physics': 1.0},
+            'lr_schedule': lambda epoch, total: 5e-4,
+            'description': 'Tiny physics weight'
+        },
+        {
+            'name': 'Phase 3: Balanced Training',
+            'epochs': epochs // 4,
+            'weights': {'initial': 10.0, 'boundary': 5.0, 'interior': 30.0, 'physics': 5.0},
+            'lr_schedule': lambda epoch, total: 2e-4,
+            'description': 'Data fitting still dominates'
         }
     ]
 

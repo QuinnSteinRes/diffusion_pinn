@@ -2,30 +2,26 @@
 # Updated for open system with boundary flux
 
 PINN_VARIABLES = {
-    # Network Architecture
-    'hidden_layers': [32, 64, 64, 32],      # Slightly larger for two-parameter problem
-    'activation': 'tanh',                    # Still best for PDEs
+    # Network Architecture - MUCH SMALLER
+    'hidden_layers': [20, 40, 20],      # Was [32, 64, 64, 32]
+    'activation': 'tanh',
 
-    # Training - increased for more complex physics
-    'epochs': 15000,                         # More epochs needed for boundary physics
-    'learning_rate': 0.0003,                 # Slightly lower for stability
-    'random_seed': 42,                       # For reproducibility
+    # Training - SHORTER, FASTER
+    'epochs': 5000,                     # Was 15000
+    'learning_rate': 0.001,             # Was 0.0003
+    'random_seed': 42,
 
-    # Physical Parameters - now learning TWO parameters
-    'initial_D': 0.0001,                     # Diffusion coefficient starting point
-    'initial_k': 0.001,                      # Boundary permeability starting point
+    # Sampling - MORE DATA FITTING
+    'N_u': 5000,                        # Was 2000
+    'N_f': 8000,                        # Was 20000
+    'N_i': 8000,                        # Was 5000
 
-    # Sampling points - rebalanced for open system
-    'N_u': 2000,     # More initial condition points (critical for open system)
-    'N_f': 20000,    # More physics points (need boundary + interior)
-    'N_i': 5000,     # Fewer interior data points (let physics dominate)
-
-    # Loss weights - rebalanced for open system physics
+    # Loss weights - DATA FITTING ONLY
     'loss_weights': {
-        'initial': 10.0,    # Initial condition is critical
-        'boundary': 5.0,    # Robin boundary conditions
-        'interior': 3.0,    # Interior physics
-        'physics': 5.0      # Overall physics weight
+        'initial': 1000.0,              # Was 10.0
+        'boundary': 0.0,                # Was 5.0 - DISABLE
+        'interior': 100.0,              # Was 3.0
+        'physics': 0.0                  # Was 5.0 - DISABLE
     },
 
     # Open system specific parameters
