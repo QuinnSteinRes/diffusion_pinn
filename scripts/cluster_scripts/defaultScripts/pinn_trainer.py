@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# Updated pinn_trainer.py - v0.2.14 approach with logarithmic D parameterization
-# MINIMAL CHANGES to preserve working functionality
+# Improved pinn_trainer.py with memory management, stability fixes, and version logging
 
 import os
 import sys
@@ -9,6 +8,7 @@ import time
 import signal
 import argparse
 import traceback
+import subprocess
 from pathlib import Path
 import psutil
 import numpy as np
@@ -53,7 +53,163 @@ from diffusion_pinn.variables import PINN_VARIABLES
 print("diffusion_pinn location:", diffusion_pinn.__file__)
 print("train_pinn location:", train_pinn.__code__.co_filename)
 
-# Memory monitoring class for memory usage tracking (keeping from original)
+def log_version_and_environment():
+    """Log comprehensive version and environment information"""
+    print("\n" + "=" * 80)
+    print("PINN DIFFUSION COEFFICIENT ESTIMATION - VERSION INFORMATION")
+    print("=" * 80)
+
+    # Basic run information
+    import datetime
+    print(f"Start Time: {datetime.datetime.now()}")
+    print(f"Job ID: {os.environ.get('JOB_ID', 'LOCAL')}")
+    print(f"Hostname: {os.environ.get('HOSTNAME', 'unknown')}")
+    print(f"User: {os.environ.get('USER', 'unknown')}")
+    print(f"Working Directory: {os.getcwd()}")
+
+    print(f"\nSOFTWARE VERSIONS:")
+    print("-" * 40)
+
+    # Package versions
+    try:
+        print(f"diffusion_pinn version: {getattr(diffusion_pinn, '__version__', 'unknown')}")
+        print(f"diffusion_pinn location: {diffusion_pinn.__file__}")
+    except Exception as e:
+        print(f"diffusion_pinn version: error - {e}")
+
+    print(f"Python version: {sys.version.split()[0]}")
+    print(f"Python executable: {sys.executable}")
+
+    try:
+        print(f"TensorFlow version: {tf.__version__}")
+    except Exception as e:
+        print(f"TensorFlow version: error - {e}")
+
+    try:
+        print(f"NumPy version: {np.__version__}")
+    except Exception as e:
+        print(f"NumPy version: error - {e}")
+
+    try:
+        print(f"Pandas version: {pd.__version__}")
+    except Exception as e:
+        print(f"Pandas version: error - {e}")
+
+    print(f"\nGIT REPOSITORY STATUS:")
+    print("-" * 40)
+
+    # Git information
+    git_repo_path = "/state/partition1/home/qs8/projects/diffusion_pinn"
+    try:
+        if os.path.exists(os.path.join(git_repo_path, '.git')):
+            # Get commit hash
+            result = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print(f"Git commit: {result.stdout.strip()}")
+            else:
+                print(f"Git commit: command failed - {result.stderr}")
+
+            # Get branch
+            result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print(f"Git branch: {result.stdout.strip()}")
+
+            # Get commit message
+            result = subprocess.run(['git', 'log', '-1', '--pretty=format:%s'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print(f"Commit message: {result.stdout.strip()}")
+
+            # Get commit date
+            result = subprocess.run(['git', 'log', '-1', '--pretty=format:%ci'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print(f"Commit date: {result.stdout.strip()}")
+
+            # Check working directory status
+            result = subprocess.run(['git', 'diff-index', '--quiet', 'HEAD', '--'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                print("Working directory: clean")
+            else:
+                print("Working directory: has uncommitted changes")
+                # Show modified files
+                result = subprocess.run(['git', 'diff', '--name-only'],
+                                      cwd=git_repo_path,
+                                      capture_output=True,
+                                      text=True,
+                                      timeout=10)
+                if result.returncode == 0 and result.stdout.strip():
+                    print("Modified files:")
+                    for file in result.stdout.strip().split('\n'):
+                        print(f"  {file}")
+
+            # Get recent commits
+            print("\nRecent commits:")
+            result = subprocess.run(['git', 'log', '--oneline', '-5'],
+                                  cwd=git_repo_path,
+                                  capture_output=True,
+                                  text=True,
+                                  timeout=10)
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    print(f"  {line}")
+
+        else:
+            print(f"Git repository: not found at {git_repo_path}")
+
+    except subprocess.TimeoutExpired:
+        print("Git commands: timed out")
+    except Exception as e:
+        print(f"Git status: error - {e}")
+
+    print(f"\nRUNTIME ENVIRONMENT:")
+    print("-" * 40)
+    print(f"PYTHONPATH: {os.environ.get('PYTHONPATH', 'not set')}")
+    print(f"Conda environment: {os.environ.get('CONDA_DEFAULT_ENV', 'unknown')}")
+    print(f"PATH (first 3 entries): {':'.join(os.environ.get('PATH', '').split(':')[:3])}")
+
+    # System information
+    print(f"\nSYSTEM INFORMATION:")
+    print("-" * 40)
+    try:
+        mem = psutil.virtual_memory()
+        print(f"Total memory: {mem.total / (1024**3):.1f} GB")
+        print(f"Available memory: {mem.available / (1024**3):.1f} GB")
+        print(f"CPU count: {psutil.cpu_count()}")
+    except Exception as e:
+        print(f"System info error: {e}")
+
+    print(f"\nPINN CONFIGURATION:")
+    print("-" * 40)
+    try:
+        for key, value in sorted(PINN_VARIABLES.items()):
+            print(f"{key}: {value}")
+    except Exception as e:
+        print(f"PINN variables error: {e}")
+
+    print("=" * 80)
+    print("END VERSION INFORMATION - STARTING TRAINING")
+    print("=" * 80 + "\n")
+
+# [Rest of the existing code remains the same - MemoryMonitor, setup_signal_handlers, etc.]
+
 class MemoryMonitor:
     def __init__(self, log_file='memory_usage.log', interval=10):
         self.log_file = log_file
@@ -110,7 +266,7 @@ class MemoryMonitor:
             self.monitor_thread.join(timeout=2)
             print("Memory monitoring stopped")
 
-# Setup signal handlers for better error reporting (keeping from original)
+# Setup signal handlers for better error reporting
 def setup_signal_handlers(log_file='crash_log.txt'):
     def signal_handler(sig, frame):
         signal_name = signal.Signals(sig).name
@@ -149,7 +305,7 @@ def setup_signal_handlers(log_file='crash_log.txt'):
     print(f"Signal handlers set up, logging to {log_file}")
 
 def preprocess_data(input_file):
-    """Preprocess the CSV data with known columns: x, y, t, intensity (keeping from original)"""
+    """Preprocess the CSV data with known columns: x, y, t, intensity"""
     try:
         print(f"Preprocessing data file: {input_file}")
         # Read using numpy
@@ -194,7 +350,7 @@ def preprocess_data(input_file):
         raise
 
 def setup_directories(base_dir):
-    """Create and return directory paths for outputs (keeping from original)"""
+    """Create and return directory paths for outputs"""
     results_dir = os.path.join(base_dir, "results")
     save_dir = os.path.join(base_dir, "saved_models")
     log_dir = os.path.join(base_dir, "tensorboard_data")
@@ -208,7 +364,7 @@ def setup_directories(base_dir):
     return results_dir, save_dir, log_dir
 
 def save_summary(base_dir, D_final, loss_history, converged=False):
-    """Save summary statistics (keeping from original)"""
+    """Save summary statistics"""
     try:
         # Create summary dictionary
         total_losses = [loss.get('total', 0) for loss in loss_history]
@@ -247,7 +403,7 @@ def save_summary(base_dir, D_final, loss_history, converged=False):
         traceback.print_exc()
 
 def check_convergence(D_history, threshold=0.001, window=100):
-    """Check if diffusion coefficient has converged (keeping from original)"""
+    """Check if diffusion coefficient has converged"""
     if len(D_history) < window:
         return False
 
@@ -266,17 +422,20 @@ def check_convergence(D_history, threshold=0.001, window=100):
     return is_converged
 
 def main(args):
-    """Main training function - MINIMAL CHANGES to preserve v0.2.14 functionality"""
+    """Main training function with improved error handling and memory management"""
     start_time = time.time()
+
+    # Log version information FIRST
+    log_version_and_environment()
+
     print("\n" + "="*50)
-    print(f"Starting PINN training with logarithmic D - {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Starting PINN training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Input file: {args.input_file}")
     print(f"Output directory: {args.output_dir}")
     print(f"Epochs: {args.epochs}")
-    print(f"Seed: {args.seed}")
+    print(f"Random seed: {args.seed}")
     print("="*50 + "\n")
 
-    # UPDATED: Add seed support but use default if not provided
     if args.seed is not None:
         print(f"Setting random seeds to {args.seed}")
         tf.random.set_seed(args.seed)
@@ -308,8 +467,8 @@ def main(args):
         # Preprocess the input data
         processed_file = preprocess_data(args.input_file)
 
-        # UPDATED: Create and initialize PINN with seed support
-        print("\nInitializing PINN model with logarithmic D parameterization...")
+        # Create and initialize PINN
+        print("\nInitializing PINN model...")
         pinn, data = create_and_initialize_pinn(
             inputfile=processed_file,
             N_u=PINN_VARIABLES['N_u'],
@@ -319,24 +478,17 @@ def main(args):
             seed=args.seed
         )
 
-        # UPDATED: Use v0.2.14 proven optimizer settings instead of complex decay
-        print("Creating optimizer with v0.2.14 proven settings...")
+        # Create optimizer with learning rate decay
+        print("Creating optimizer with learning rate decay...")
         optimizer = tf.keras.optimizers.Adam(
-            learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate=PINN_VARIABLES['learning_rate'],
-                decay_steps=PINN_VARIABLES['decay_steps'],
-                decay_rate=PINN_VARIABLES['decay_rate']
-            )
+            learning_rate=PINN_VARIABLES['learning_rate']
         )
 
         # Train the model
         print("\n" + "="*50)
         print(f"Starting training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Training for {args.epochs} epochs")
-        print(f"Initial D = {pinn.get_diffusion_coefficient():.6e}")
-        # UPDATED: Show log(D) info
-        if hasattr(pinn, 'get_log_diffusion_coefficient'):
-            print(f"Initial log(D) = {pinn.get_log_diffusion_coefficient():.6f}")
+        print(f"Initial D = {pinn.get_diffusion_coefficient():.6f}")
         print("="*50 + "\n")
 
         # Use a try-except block for training to catch any errors
@@ -346,8 +498,7 @@ def main(args):
                 data=data,
                 optimizer=optimizer,
                 epochs=args.epochs,
-                save_dir=str(save_dir),
-                seed=args.seed  # Pass seed to training
+                save_dir=str(save_dir)
             )
 
             # Check if training was successful
@@ -380,16 +531,14 @@ def main(args):
 
             # Plot loss history
             plot_loss_history(loss_history, save_dir=results_dir)
-            #plt.savefig(os.path.join(plot_dir, 'loss_history.png'))
             plt.close()
 
             # Plot diffusion coefficient convergence
             plot_diffusion_convergence(D_history, save_dir=results_dir)
-            #plt.savefig(os.path.join(plot_dir, 'd_convergence.png'))
             plt.close()
 
             # Plot solutions
-            data_processor = DiffusionDataProcessor(processed_file, seed=args.seed)
+            data_processor = DiffusionDataProcessor(processed_file)
             t_indices = [0, len(data_processor.t)//3, 2*len(data_processor.t)//3, -1]
             plot_solutions_and_error(
                 pinn=pinn,
@@ -416,9 +565,6 @@ def main(args):
         print(f"Training completed - {time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Total runtime: {elapsed_time/60:.2f} minutes")
         print(f"Final diffusion coefficient: {final_D:.8f}")
-        # UPDATED: Show final log(D) info
-        if hasattr(pinn, 'get_log_diffusion_coefficient'):
-            print(f"Final log(D): {pinn.get_log_diffusion_coefficient():.6f}")
         print(f"Convergence status: {converged}")
         print("="*50 + "\n")
 
@@ -444,14 +590,12 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train PINN model for diffusion problem')
-    parser.add_argument('--input-file', type=str,
-                      default=os.path.join(os.path.dirname(__file__), 'intensity_time_series_spatial_temporal.csv'),
+    parser.add_argument('--input-file', type=str, default=os.path.join(os.path.dirname(__file__), 'intensity_time_series_spatial_temporal.csv'),
                       help='Path to input CSV file')
     parser.add_argument('--output-dir', type=str, default='.',
                       help='Base directory for output')
     parser.add_argument('--epochs', type=int, default=PINN_VARIABLES['epochs'],
                       help='Number of training epochs')
-    # UPDATED: Add seed argument with default from PINN_VARIABLES
     parser.add_argument('--seed', type=int, default=PINN_VARIABLES['random_seed'],
                       help='Random seed for reproducibility')
 
