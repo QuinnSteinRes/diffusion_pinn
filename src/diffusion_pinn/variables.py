@@ -4,7 +4,7 @@ PINN_VARIABLES = {
     'activation': 'tanh',               # tanh works well for PDEs
 
     # Training Parameters - Using v0.2.14 proven settings
-    'epochs': 15000,                    # Sufficient for convergence
+    'epochs': 10000,                    # Sufficient for convergence
     'learning_rate': 0.001,             # Stable learning rate
     'decay_steps': 500,                 # Learning rate decay
     'decay_rate': 0.95,
@@ -22,7 +22,7 @@ PINN_VARIABLES = {
     'loss_weights': {
         'initial': 1.0,
         'boundary': 1.0,
-        'interior': 1,   # Strong emphasis on data fitting
-        'physics': 1      # Strong physics enforcement
+        'interior': 10.0,   # Strong emphasis on data fitting
+        'physics': 8.0      # Strong physics enforcement
     }
 }
