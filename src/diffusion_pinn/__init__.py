@@ -17,7 +17,7 @@ except ImportError:
     OPTIMIZATION_SETTINGS = {}
     _has_optimization = False
 
-__version__ = '0.2.26'
+__version__ = '0.2.26.td1'
 
 # Base components that should always be available
 __all__ = [
