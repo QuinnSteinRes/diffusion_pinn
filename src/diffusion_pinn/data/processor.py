@@ -192,7 +192,7 @@ class DiffusionDataProcessor:
             gc.collect()
 
     def prepare_training_data(self, N_u: int, N_f: int, N_i: int,
-                            temporal_density: int = 10, seed: int = None) -> Dict[str, tf.Tensor]:
+                            temporal_density: int = 1, seed: int = None) -> Dict[str, tf.Tensor]:
         """
         Prepare training data for the PINN - keeping v0.2.14 approach with seed support
 
