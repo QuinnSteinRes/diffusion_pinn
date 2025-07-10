@@ -52,13 +52,6 @@ class DiffusionPINN(tf.Module):
             name='log_diffusion_coefficient'
         )
 
-        # Define reasonable bounds for log(D)
-        self.log_D_min = -16.0   # Corresponds to D ≈ 1e-7
-        self.log_D_max = -4.0    # Corresponds to D ≈ 0.018
-
-        print(f"Log(D) bounds: [{self.log_D_min:.1f}, {self.log_D_max:.1f}]")
-        print(f"Corresponding D bounds: [{np.exp(self.log_D_min):.2e}, {np.exp(self.log_D_max):.2e}]")
-
         # Store loss weights from variables
         self.loss_weights = PINN_VARIABLES['loss_weights']
 
@@ -206,10 +199,8 @@ class DiffusionPINN(tf.Module):
         # Cleanup
         del tape
 
-        # LOGARITHMIC PARAMETERIZATION: Convert log(D) to D with soft constraints
-        # Apply soft bounds to prevent extreme values
-        constrained_log_D = tf.clip_by_value(self.log_D, self.log_D_min + 1.0, self.log_D_max - 1.0)
-        D_value = tf.exp(constrained_log_D)
+        # UNCONSTRAINED: Convert log(D) to D without bounds
+        D_value = tf.exp(self.log_D)
 
         # Enhanced numerical stability (keeping v0.2.14 approach)
         laplacian = d2c_dx2 + d2c_dy2
@@ -291,18 +282,10 @@ class DiffusionPINN(tf.Module):
         else:
             losses['physics'] = tf.constant(0.0, dtype=tf.float32)
 
-        # Total loss with regularization for diffusion coefficient
+        # Total loss without any D regularization - completely unconstrained
         total_loss = sum(weights.get(key, 1.0) * losses[key] for key in losses.keys())
 
-        # UPDATED: Logarithmic D regularization (replaces v0.2.14 D regularization)
-        # Add light regularization to keep log(D) in reasonable range
-        log_d_reg = 0.001 * tf.nn.relu(self.log_D_min + 2.0 - self.log_D) + \
-                    0.001 * tf.nn.relu(self.log_D - self.log_D_max + 2.0)
-
-        total_loss = total_loss + log_d_reg
-        losses['log_d_regularization'] = log_d_reg
         losses['total'] = total_loss
-
         return losses
 
     def get_trainable_variables(self) -> List[tf.Variable]:

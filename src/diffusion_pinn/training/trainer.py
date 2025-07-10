@@ -84,8 +84,7 @@ def train_pinn(pinn: 'DiffusionPINN',
     D_min = 1e-8
     D_max = 1e-1
 
-    print(f"\nStarting training with logarithmic D parameterization for {epochs} epochs")
-    print(f"Initial D: {pinn.get_diffusion_coefficient():.8e}")
+    print(f"\nStarting UNCONSTRAINED training with logarithmic D parameterization for {epochs} epochs")
     print(f"Initial log(D): {pinn.get_log_diffusion_coefficient():.6f}")
 
     # Use v0.2.14 two-phase training approach but adapted for log D
@@ -134,18 +133,6 @@ def train_pinn(pinn: 'DiffusionPINN',
             gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-            # UPDATED: Logarithmic D constraint (replaces v0.2.14 D clipping)
-            # Soft constraint for log(D) to prevent extreme values
-            if pinn.config.diffusion_trainable:
-                current_log_D = pinn.log_D.numpy()
-                if current_log_D < pinn.log_D_min or current_log_D > pinn.log_D_max:
-                    # Apply soft constraint - nudge towards bounds rather than hard clip
-                    if current_log_D < pinn.log_D_min:
-                        nudged_log_D = 0.9 * current_log_D + 0.1 * pinn.log_D_min
-                    else:
-                        nudged_log_D = 0.9 * current_log_D + 0.1 * pinn.log_D_max
-                    pinn.log_D.assign(nudged_log_D)
-
             # Record history
             current_D = pinn.get_diffusion_coefficient()
             current_log_D = pinn.get_log_diffusion_coefficient()
@@ -189,15 +176,6 @@ def train_pinn(pinn: 'DiffusionPINN',
             gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
             optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-            # UPDATED: Softer constraint in phase 2 for log(D)
-            if pinn.config.diffusion_trainable:
-                current_log_D = pinn.log_D.numpy()
-                # Only apply very soft constraints in phase 2
-                if current_log_D < pinn.log_D_min - 2.0:
-                    pinn.log_D.assign(pinn.log_D_min - 2.0)
-                elif current_log_D > pinn.log_D_max + 2.0:
-                    pinn.log_D.assign(pinn.log_D_max + 2.0)
-
             # Record history
             current_D = pinn.get_diffusion_coefficient()
             current_log_D = pinn.get_log_diffusion_coefficient()
@@ -210,14 +188,15 @@ def train_pinn(pinn: 'DiffusionPINN',
         final_log_D = pinn.get_log_diffusion_coefficient()
         print(f"\nTraining completed:")
         print(f"Final D: {final_D:.8e}")
-        print(f"Final log(D): {final_log_D:.6f}")
 
         # Check convergence
-        if len(log_D_history) >= 100:
-            recent_log_d = log_D_history[-100:]
-            log_d_std = np.std(recent_log_d)
-            print(f"log(D) convergence metric (last 100 epochs): {log_d_std:.6f}")
-            print(f"Converged: {'Yes' if log_d_std < 0.05 else 'No'}")
+        if len(D_history) >= 100:
+            recent_d = D_history[-100:]
+            d_mean = np.mean(recent_d)
+            d_std = np.std(recent_d)
+            rel_std = d_std / d_mean if d_mean != 0 else float('inf')
+            print(f"D convergence metric (last 100 epochs): relative std = {rel_std:.6f}")
+            print(f"Converged: {'Yes' if rel_std < 0.05 else 'No'}")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted!")
