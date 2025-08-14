@@ -4,7 +4,7 @@ PINN_VARIABLES = {
     'activation': 'tanh',               # tanh works well for PDEs
 
     # Training Parameters - Using v0.2.14 proven settings
-    'epochs': 10000,                    # Sufficient for convergence
+    'epochs': 25000,                    # Sufficient for convergence
     'learning_rate': 0.001,             # Stable learning rate
     'decay_steps': 500,                 # Learning rate decay
     'decay_rate': 0.95,
@@ -14,9 +14,9 @@ PINN_VARIABLES = {
     'initial_D': 0.00009,               # Better initial guess from v0.2.14
 
     # Sampling Points - Using v0.2.14 proven distribution
-    'N_u': 1000,    # boundary points
-    'N_f': 15000,   # collocation points (reduced to avoid memory issues)
-    'N_i': 8000,    # interior points
+    'N_u': 2000,    # boundary points
+    'N_f': 30000,   # collocation points (reduced to avoid memory issues)
+    'N_i': 16000,    # interior points
 
     # Loss Weights - Using v0.2.14 proven weighting that ensures good concentration fields
     'loss_weights': {
