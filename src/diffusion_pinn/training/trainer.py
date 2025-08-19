@@ -92,7 +92,7 @@ def train_pinn(pinn: 'DiffusionPINN',
     try:
         # Phase 1: Initial training with strong regularization
         print("Phase 1: Initial training with logarithmic D...")
-        phase1_epochs = min(epochs // 3, 1000)
+        phase1_epochs = epochs
 
         for epoch in range(phase1_epochs):
             if epoch % 50 == 0:
@@ -155,7 +155,7 @@ def train_pinn(pinn: 'DiffusionPINN',
 
         # Phase 2: Fine-tuning with reduced regularization (v0.2.14 style)
         print("Phase 2: Fine-tuning with logarithmic D...")
-        phase2_epochs = epochs - phase1_epochs
+        phase2_epochs = 0
 
         for epoch in range(phase2_epochs):
             if epoch % 50 == 0:
