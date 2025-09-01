@@ -23,6 +23,6 @@ PINN_VARIABLES = {
         'initial': 1.0,
         'boundary': 1.0,
         'interior': 1.0,   # Strong emphasis on data fitting
-        'physics': 1.0      # Strong physics enforcement
+        'physics': 5.0      # Strong physics enforcement
     }
 }
