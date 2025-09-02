@@ -22,7 +22,7 @@ PINN_VARIABLES = {
     'loss_weights': {
         'initial': 1.0,
         'boundary': 1.0,
-        'interior': 5.0,   # Strong emphasis on data fitting
+        'interior': 10.0,   # Strong emphasis on data fitting
         'physics': 1.0      # Strong physics enforcement
     }
 }
