@@ -1,12 +1,12 @@
 #!/bin/bash
-# create_pinn_case.sh
-# Script to create a new PINN test case directory with default scripts
+# Updated create_pinn_case.sh - Compatible with new PINN labeled data interface
+# Script to create a new PINN test case directory with updated scripts
 # Author: Quinn Stein
 
 # Display help message if requested
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     echo "Usage: $0 [case_name] [options]"
-    echo "Creates a new directory with default scripts for PINN testing"
+    echo "Creates a new directory with updated scripts for PINN testing"
     echo ""
     echo "Arguments:"
     echo "  case_name          Name of the case directory (default: YYYYMMDD_Test)"
@@ -17,6 +17,12 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     echo "  -d, --dest DIR     Parent directory for the new case (default: ~/projects/pinnRuns)"
     echo "  -r, --runs N       Number of runs to prepare (default: 1)"
     echo "  -h, --help         Display this help message and exit"
+    echo ""
+    echo "New interface features:"
+    echo "  - Labeled data structure (boundary, interior, physics points)"
+    echo "  - Updated parameter names and interfaces"
+    echo "  - Improved memory management and error handling"
+    echo "  - Enhanced convergence analysis"
     exit 0
 fi
 
@@ -67,7 +73,7 @@ if [ "$USE_BAYESIAN" = true ]; then
     echo "Using Bayesian optimization scripts"
 else
     SCRIPT_SRC="$SOURCE_DIR/cluster_scripts"
-    echo "Using standard PINN scripts"
+    echo "Using standard PINN scripts (updated for new interface)"
 fi
 
 # Check if source directory exists
@@ -103,7 +109,7 @@ mkdir -p "$DEST_DIR"
 
 # Copy files
 echo "Creating new PINN test case in $DEST_DIR"
-echo "Copying default scripts..."
+echo "Copying updated scripts for new interface..."
 cp -r "$SCRIPT_SRC/defaultScripts" "$DEST_DIR/"
 cp "$SCRIPT_SRC/multiCase.sh" "$DEST_DIR/"
 
@@ -137,13 +143,82 @@ fi
 # Modify multiCase.sh to use the specified number of runs
 if [ "$NUM_RUNS" -ne 1 ]; then
     echo "Configuring for $NUM_RUNS runs..."
-    sed -i "s/cases=(1)/cases=($(seq -s " " 1 $NUM_RUNS))/g" "$DEST_DIR/multiCase.sh"
+    sed -i "s/NUM_RUNS=\${1:-10}/NUM_RUNS=\${1:-$NUM_RUNS}/g" "$DEST_DIR/multiCase.sh"
 fi
+
+# Create a README with new interface information
+cat > "$DEST_DIR/README.md" << 'EOF'
+# PINN Test Case - Updated Interface
+
+This directory contains updated PINN scripts with the new labeled data interface.
+
+## Key Updates
+
+### New Interface Features:
+- **Labeled Data Structure**: Clear separation of boundary, interior, and physics points
+- **Updated Parameter Names**:
+  - `N_u` → `N_boundary` (boundary/initial condition points)
+  - `N_i` → `N_interior` (interior supervision points)
+  - `N_f` → `N_collocation` (physics collocation points)
+- **Improved Memory Management**: Better handling of large datasets
+- **Enhanced Error Handling**: More robust training with better diagnostics
+- **Cleaner Loss Computation**: No more point type guessing
+
+### Training Process:
+1. Data processor creates labeled point sets
+2. PINN trains on clearly defined point types
+3. Enhanced convergence checking and diagnostics
+4. Improved visualization and analysis
+
+## Usage
+
+### Run Single Test:
+```bash
+cd defaultScripts
+qsub runCase.sh
+```
+
+### Run Multiple Seeds:
+```bash
+./multiCase.sh [num_runs] [seed_mode] [base_seed]
+```
+
+### Post-Processing:
+```bash
+./create_scripts.sh  # Create analysis scripts
+./run_d.sh          # Run full analysis
+```
+
+## File Structure
+
+- `defaultScripts/`: Updated training scripts
+  - `pinn_trainer.py`: Main trainer with new interface
+  - `runCase.sh`: Cluster submission script
+  - `intensity_time_series_spatial_temporal.csv`: Training data
+- `multiCase.sh`: Multi-run submission script
+- `create_scripts.sh`: Post-processing script generator
+
+## New Interface Benefits
+
+1. **Clearer Code**: No ambiguity about point types
+2. **Better Performance**: Optimized memory usage
+3. **Easier Debugging**: Clear separation of loss components
+4. **More Robust**: Better error handling and recovery
+5. **Enhanced Analysis**: Improved convergence checking
+
+EOF
 
 echo "Successfully created PINN test case directory: $DEST_DIR"
 echo ""
 echo "Directory structure:"
 ls -la "$DEST_DIR"
+echo ""
+echo "New interface features:"
+echo "✓ Labeled data structure (boundary, interior, physics)"
+echo "✓ Updated parameter names and interfaces"
+echo "✓ Improved memory management"
+echo "✓ Enhanced error handling and diagnostics"
+echo "✓ Better convergence analysis"
 echo ""
 echo "To run the test case:"
 echo "cd $DEST_DIR"
@@ -151,3 +226,6 @@ echo "./multiCase.sh"
 echo ""
 echo "For post-processing after runs complete:"
 echo "./create_scripts.sh"
+echo "./run_d.sh"
+echo ""
+echo "See README.md for detailed information about the new interface."

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Seed robustness testing for PINN diffusion coefficient
-# This script tests whether your PINN gives consistent but varied results across different seeds
+# Updated multiCase.sh - Compatible with new PINN labeled data interface
+# Seed robustness testing for PINN diffusion coefficient - ASCII only
 
 set -e
 
@@ -10,8 +10,8 @@ NUM_RUNS=${1:-10}
 SEED_MODE=${2:-"random"}  # Options: "random", "fixed", "sequential"
 BASE_SEED=${3:-42}
 
-echo "PINN Seed Robustness Test"
-echo "========================"
+echo "PINN Seed Robustness Test (Updated for New Interface)"
+echo "===================================================="
 echo "Working directory: $WORKDIR"
 echo "Number of runs: $NUM_RUNS"
 echo "Seed mode: $SEED_MODE"
@@ -20,6 +20,15 @@ echo "Seed mode: $SEED_MODE"
 if [ ! -d "$WORKDIR/defaultScripts" ]; then
     echo "Error: defaultScripts directory not found!"
     echo "Expected: $WORKDIR/defaultScripts"
+    exit 1
+fi
+
+# Verify data file exists
+DATA_FILE="$WORKDIR/defaultScripts/intensity_time_series_spatial_temporal.csv"
+if [ ! -f "$DATA_FILE" ]; then
+    echo "Error: Data file not found!"
+    echo "Expected: $DATA_FILE"
+    echo "Please copy your data file to the defaultScripts directory."
     exit 1
 fi
 
@@ -63,10 +72,11 @@ echo ""
 
 # Create a test log
 TEST_LOG="$WORKDIR/seed_test_log.txt"
-echo "PINN Seed Robustness Test - $(date)" > $TEST_LOG
+echo "PINN Seed Robustness Test (New Interface) - $(date)" > $TEST_LOG
 echo "Seed mode: $SEED_MODE" >> $TEST_LOG
 echo "Number of runs: $NUM_RUNS" >> $TEST_LOG
 echo "Seeds: ${SEEDS[@]}" >> $TEST_LOG
+echo "New interface: labeled data structure" >> $TEST_LOG
 echo "========================================" >> $TEST_LOG
 
 # Process each run
@@ -90,27 +100,38 @@ do
     cd "$RUN_DIR"
 
     # Update job name to include seed for tracking
-    JOB_NAME="run10_${i}_s${SEED}"
+    JOB_NAME="pinn_${i}_s${SEED}"
     sed -i "s/CHARCASE/$JOB_NAME/g" runCase.sh
 
-    # Add or update seed parameter in the Python command
-    if grep -q "\-\-seed" runCase.sh; then
-        # Update existing seed parameter
-        sed -i "s/--seed [0-9]*/--seed $SEED/g" runCase.sh
-        echo "  Updated existing seed parameter to $SEED"
+    # Update the Python command with proper arguments for new interface
+    # Remove any existing seed arguments first
+    sed -i 's/--seed [0-9]*//g' runCase.sh
+    sed -i 's/--epochs [0-9]*//g' runCase.sh
+
+    # Add proper arguments with new interface
+    if grep -q "python pinn_trainer\.py" runCase.sh; then
+        # Update existing Python command
+        sed -i "s/python pinn_trainer\.py.*/python pinn_trainer.py --seed $SEED --epochs 100 --output-dir \./" runCase.sh
+        echo "  [OK] Updated Python command with seed $SEED and new interface"
     else
-        # Add seed parameter to Python command
-        sed -i "s/python pinn_trainer\.py/python pinn_trainer.py --seed $SEED/g" runCase.sh
-        echo "  Added seed parameter $SEED to Python command"
+        echo "  [ERROR] Warning: Could not find Python command in runCase.sh"
+        echo "  Current runCase.sh content:"
+        grep -n "python" runCase.sh || echo "  No Python commands found!"
     fi
 
-    # Verify the seed was set correctly
+    # Verify the command was set correctly
     if grep -q "python pinn_trainer.py --seed $SEED" runCase.sh; then
-        echo "  \u2713 Seed $SEED correctly set in runCase.sh"
+        echo "  [OK] Seed $SEED correctly set in runCase.sh"
     else
-        echo "  \u2717 Warning: Seed may not be set correctly"
+        echo "  [WARNING] Warning: Seed may not be set correctly"
         echo "  Current Python command:"
         grep "python pinn_trainer.py" runCase.sh || echo "  No Python command found!"
+    fi
+
+    # Ensure data file is present
+    if [ ! -f "intensity_time_series_spatial_temporal.csv" ]; then
+        echo "  Warning: Data file missing, copying from defaultScripts"
+        cp "$DATA_FILE" .
     fi
 
     # Submit job
@@ -126,4 +147,15 @@ done
 echo ""
 echo "All $NUM_RUNS jobs submitted successfully!"
 echo "Seeds used: ${SEEDS[@]}"
-
+echo ""
+echo "Key updates for new interface:"
+echo "- Using labeled data structure (boundary, interior, physics points)"
+echo "- Updated parameter names (N_boundary, N_interior, N_collocation)"
+echo "- Improved memory management and error handling"
+echo "- Enhanced convergence checking"
+echo ""
+echo "Monitor progress with:"
+echo "qstat -u $USER"
+echo ""
+echo "After completion, run post-processing:"
+echo "./create_scripts.sh && ./run_d.sh"

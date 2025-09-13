@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Improved pinn_trainer.py with memory management, stability fixes, and version logging
+# Updated pinn_trainer.py compatible with new labeled data structure
 
 import os
 import sys
@@ -208,9 +208,8 @@ def log_version_and_environment():
     print("END VERSION INFORMATION - STARTING TRAINING")
     print("=" * 80 + "\n")
 
-# [Rest of the existing code remains the same - MemoryMonitor, setup_signal_handlers, etc.]
-
 class MemoryMonitor:
+    """Local memory monitor implementation"""
     def __init__(self, log_file='memory_usage.log', interval=10):
         self.log_file = log_file
         self.interval = interval
@@ -467,13 +466,14 @@ def main(args):
         # Preprocess the input data
         processed_file = preprocess_data(args.input_file)
 
-        # Create and initialize PINN
-        print("\nInitializing PINN model...")
-        pinn, data = create_and_initialize_pinn(
+        # Create and initialize PINN with NEW INTERFACE
+        print("\nInitializing PINN model with labeled data structure...")
+        pinn, labeled_data = create_and_initialize_pinn(
             inputfile=processed_file,
-            N_u=PINN_VARIABLES['N_u'],
-            N_f=PINN_VARIABLES['N_f'],
-            N_i=PINN_VARIABLES['N_i'],
+            N_boundary=PINN_VARIABLES['N_u'],      # Updated parameter names
+            N_interior=PINN_VARIABLES['N_i'],      # Updated parameter names
+            N_collocation=PINN_VARIABLES['N_f'],   # Updated parameter names
+            temporal_density=5,                    # New parameter
             initial_D=PINN_VARIABLES['initial_D'],
             seed=args.seed
         )
@@ -484,7 +484,7 @@ def main(args):
             learning_rate=PINN_VARIABLES['learning_rate']
         )
 
-        # Train the model
+        # Train the model with NEW INTERFACE
         print("\n" + "="*50)
         print(f"Starting training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Training for {args.epochs} epochs")
@@ -495,10 +495,11 @@ def main(args):
         try:
             D_history, loss_history = train_pinn(
                 pinn=pinn,
-                data=data,
+                labeled_data=labeled_data,  # ✅ NEW labeled data interface
                 optimizer=optimizer,
                 epochs=args.epochs,
-                save_dir=str(save_dir)
+                save_dir=str(save_dir),
+                seed=args.seed
             )
 
             # Check if training was successful
@@ -518,7 +519,7 @@ def main(args):
             return 1
 
         # Clean up training data to free memory
-        del data
+        del labeled_data
         gc.collect()
 
         # Check convergence
@@ -537,8 +538,9 @@ def main(args):
             plot_diffusion_convergence(D_history, save_dir=results_dir)
             plt.close()
 
-            # Plot solutions
-            data_processor = DiffusionDataProcessor(processed_file)
+            # Plot solutions - create new data processor for plotting
+            print("Creating plots of final solutions...")
+            data_processor = DiffusionDataProcessor(processed_file, seed=args.seed)
             t_indices = [0, len(data_processor.t)//3, 2*len(data_processor.t)//3, -1]
             plot_solutions_and_error(
                 pinn=pinn,
@@ -546,6 +548,12 @@ def main(args):
                 t_indices=t_indices,
                 save_path=os.path.join(results_dir, 'final_solutions.png')
             )
+            plt.close()
+
+            # Clean up data processor
+            del data_processor
+            gc.collect()
+
         except Exception as e:
             print(f"Warning: Error during plotting: {str(e)}")
             traceback.print_exc()

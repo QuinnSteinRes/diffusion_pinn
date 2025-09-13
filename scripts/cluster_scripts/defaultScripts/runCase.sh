@@ -1,5 +1,5 @@
 #!/bin/bash
-# Updated runCase.sh script with better error handling and memory management
+# Updated runCase.sh script with better error handling and compatibility with new PINN interface
 
 #$ -S /bin/sh
 #$ -cwd
@@ -85,7 +85,8 @@ MONITOR_PID=$!
 # Run with error handling and pass seed
 echo "Starting Python execution at $(date)" > execution.log
 {
-    python pinn_trainer.py #--epochs 20000
+    # Updated command with proper argument handling for new interface
+    python pinn_trainer.py --epochs $PINN_VARIABLES_epochs --seed $PINN_VARIABLES_random_seed
     exit_code=$?
     echo "Python exit code: $exit_code" >> execution.log
 } >> logRun 2>&1
