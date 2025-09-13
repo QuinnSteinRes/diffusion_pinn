@@ -32,7 +32,6 @@ def main():
 
     # Use exact variables from PINN_VARIABLES
     data_file = "src/diffusion_pinn/data/intensity_time_series_spatial_temporal.csv"
-
     if not os.path.exists(data_file):
         print(f"Data file not found: {data_file}")
         return
@@ -49,12 +48,12 @@ def main():
     try:
         print("Creating and initializing PINN...")
 
-        # Create PINN exactly like cluster script
+        # Create PINN with NEW parameter names
         pinn, training_data = create_and_initialize_pinn(
             inputfile=data_file,
-            N_u=PINN_VARIABLES['N_u'],
-            N_f=PINN_VARIABLES['N_f'],
-            N_i=PINN_VARIABLES['N_i'],
+            N_boundary=PINN_VARIABLES['N_u'],      # CHANGED: N_u → N_boundary
+            N_collocation=PINN_VARIABLES['N_f'],   # CHANGED: N_f → N_collocation
+            N_interior=PINN_VARIABLES['N_i'],      # CHANGED: N_i → N_interior
             initial_D=PINN_VARIABLES['initial_D'],
             seed=PINN_VARIABLES['random_seed']
         )
@@ -67,10 +66,10 @@ def main():
         print(f"Starting training for {PINN_VARIABLES['epochs']} epochs...")
         start_time = time.time()
 
-        # Train exactly like cluster script
+        # Train with NEW parameter name
         D_history, loss_history = train_pinn(
             pinn=pinn,
-            data=training_data,
+            labeled_data=training_data,  # CHANGED: data → labeled_data
             optimizer=optimizer,
             epochs=PINN_VARIABLES['epochs']
         )
