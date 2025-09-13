@@ -153,27 +153,28 @@ class DiffusionPINN(tf.Module):
     # ===================================================================
     # 2. PDE PHYSICS - Your frequent modification area
     # ===================================================================
-    def _compute_gradients(self, coords: tf.Tensor, u: tf.Tensor) -> Dict[str, tf.Tensor]:
-        """Compute spatial and temporal derivatives"""
-        with tf.GradientTape(persistent=True) as tape:
-            tape.watch(coords)
+    def _compute_gradients_with_tape(self, tape: tf.GradientTape, coords: tf.Tensor, u: tf.Tensor) -> Dict[str, tf.Tensor]:
+        """Compute spatial and temporal derivatives using an existing tape"""
+        # First derivatives
+        grad = tape.gradient(u, coords)
 
-            # First derivatives
-            grad = tape.gradient(u, coords)
+        # Check if gradient computation failed
+        if grad is None:
+            raise ValueError("First gradient computation failed - check tensor connectivity")
 
-            # Check if gradient computation failed
-            if grad is None:
-                raise ValueError("Gradient computation failed - check tensor connectivity")
+        du_dx = tf.reshape(grad[:, 0], (-1, 1))
+        du_dy = tf.reshape(grad[:, 1], (-1, 1))
+        du_dt = tf.reshape(grad[:, 2], (-1, 1))
 
-            du_dx = tf.reshape(grad[:, 0], (-1, 1))
-            du_dy = tf.reshape(grad[:, 1], (-1, 1))
-            du_dt = tf.reshape(grad[:, 2], (-1, 1))
+        # Second derivatives - check for None before indexing
+        d2u_dx2_full = tape.gradient(du_dx, coords)
+        d2u_dy2_full = tape.gradient(du_dy, coords)
 
-        # Second derivatives (same pattern)
-        d2u_dx2 = tape.gradient(du_dx, coords)[:, 0:1]
-        d2u_dy2 = tape.gradient(du_dy, coords)[:, 1:2]
+        if d2u_dx2_full is None or d2u_dy2_full is None:
+            raise ValueError("Second derivative computation failed - check tape persistence and connectivity")
 
-        del tape
+        d2u_dx2 = d2u_dx2_full[:, 0:1]
+        d2u_dy2 = d2u_dy2_full[:, 1:2]
 
         return {
             'du_dx': du_dx,
@@ -243,21 +244,46 @@ class DiffusionPINN(tf.Module):
         return tf.concat(residuals, axis=0)
 
     def _compute_single_batch_residual(self, coords_batch: tf.Tensor) -> tf.Tensor:
-        """Compute PDE residual for a single batch"""
-        # Ensure coords_batch is a tensor and has requires_grad
+        """Compute PDE residual for a single batch with proper second derivative handling"""
         coords_batch = tf.convert_to_tensor(coords_batch, dtype=tf.float32)
 
-        with tf.GradientTape() as tape:
-            tape.watch(coords_batch)  # Make sure tape watches the tensor
-            u = self.forward_pass(coords_batch)
+        # Compute first derivatives
+        with tf.GradientTape(persistent=True) as tape1:
+            tape1.watch(coords_batch)
 
-        # Compute all derivatives
-        gradients = self._compute_gradients(coords_batch, u)
+            with tf.GradientTape(persistent=True) as tape2:
+                tape2.watch(coords_batch)
+                u = self.forward_pass(coords_batch)
 
-        # Apply diffusion equation
-        residual = self._apply_diffusion_equation(gradients)
+            # First derivatives
+            grad = tape2.gradient(u, coords_batch)
+            if grad is None:
+                raise ValueError("First gradient computation failed")
+
+            du_dx = grad[:, 0:1]
+            du_dy = grad[:, 1:2]
+            du_dt = grad[:, 2:3]
+
+        # Second derivatives
+        d2u_dx2 = tape1.gradient(du_dx, coords_batch)
+        d2u_dy2 = tape1.gradient(du_dy, coords_batch)
+
+        if d2u_dx2 is None or d2u_dy2 is None:
+            raise ValueError("Second derivative computation failed")
+
+        d2u_dx2 = d2u_dx2[:, 0:1]
+        d2u_dy2 = d2u_dy2[:, 1:2]
+        laplacian = d2u_dx2 + d2u_dy2
+
+        # Clean up tapes
+        del tape1, tape2
+
+        # Apply diffusion equation: du/dt - D * laplacian = 0
+        D = tf.abs(self.D)  # Ensure positive D
+        residual = du_dt - D * laplacian
 
         return residual
+
 
     # ===================================================================
     # 3. LOSS COMPUTATION
