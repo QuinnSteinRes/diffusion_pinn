@@ -6,7 +6,7 @@
 #$ -j y
 #$ -N CHARCASE
 #$ -pe mpich 1
-#$ -P WolframGroup
+#$ -P OzelGroup
 
 # Better error handling
 set -e

@@ -12,8 +12,6 @@ echo "PINN Seed Robustness Test (FORCED variables.py Configuration)"
 echo "============================================================="
 echo "Working directory: $WORKDIR"
 echo "Number of runs: $NUM_RUNS"
-echo "ALL PARAMETERS FORCED FROM variables.py - NO OVERRIDES"
-echo "============================================================="
 
 # Verify defaultScripts exists
 if [ ! -d "$WORKDIR/defaultScripts" ]; then
@@ -95,22 +93,9 @@ do
     cd "$WORKDIR"
 
     # Small delay to avoid overwhelming the scheduler
-    sleep 2
+    sleep 0.5
 done
 
 echo ""
 echo "All $NUM_RUNS jobs submitted successfully!"
-echo "Configuration: ALL FROM variables.py (epochs: from PINN_VARIABLES['epochs'])"
 echo ""
-echo "Key features of this version:"
-echo "- NO parameter overrides - everything from variables.py"
-echo "- NO --epochs arguments"
-echo "- NO --seed arguments"
-echo "- Consistent configuration across all runs"
-echo "- Seed comes from PINN_VARIABLES['random_seed']"
-echo ""
-echo "Monitor progress with:"
-echo "qstat -u $USER"
-echo ""
-echo "After completion, run post-processing:"
-echo "./create_scripts.sh && ./run_d.sh"
