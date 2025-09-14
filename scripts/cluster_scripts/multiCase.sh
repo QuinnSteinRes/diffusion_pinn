@@ -1,20 +1,19 @@
 #!/bin/bash
-# Updated multiCase.sh - Compatible with new PINN labeled data interface
-# Seed robustness testing for PINN diffusion coefficient - ASCII only
+# Fixed multiCase.sh - FORCES variables.py configuration, no overrides
+# Seed robustness testing for PINN diffusion coefficient
 
 set -e
 
 # Configuration
 WORKDIR=$PWD
 NUM_RUNS=${1:-10}
-SEED_MODE=${2:-"random"}  # Options: "random", "fixed", "sequential"
-BASE_SEED=${3:-42}
 
-echo "PINN Seed Robustness Test (Updated for New Interface)"
-echo "===================================================="
+echo "PINN Seed Robustness Test (FORCED variables.py Configuration)"
+echo "============================================================="
 echo "Working directory: $WORKDIR"
 echo "Number of runs: $NUM_RUNS"
-echo "Seed mode: $SEED_MODE"
+echo "ALL PARAMETERS FORCED FROM variables.py - NO OVERRIDES"
+echo "============================================================="
 
 # Verify defaultScripts exists
 if [ ! -d "$WORKDIR/defaultScripts" ]; then
@@ -32,61 +31,20 @@ if [ ! -f "$DATA_FILE" ]; then
     exit 1
 fi
 
-# Generate seeds based on mode
-declare -a SEEDS
-case $SEED_MODE in
-    "random")
-        echo "Generating random seeds..."
-        for i in $(seq 1 $NUM_RUNS); do
-            SEEDS[$i]=$RANDOM
-        done
-        ;;
-    "sequential")
-        echo "Generating sequential seeds starting from $BASE_SEED..."
-        for i in $(seq 1 $NUM_RUNS); do
-            SEEDS[$i]=$((BASE_SEED + i - 1))
-        done
-        ;;
-    "fixed")
-        echo "Using predetermined seed list..."
-        FIXED_SEEDS=(42 55 71 89 107 127 149 173 199 227 251 277 307 337 367 397 431 463 499 541)
-        for i in $(seq 1 $NUM_RUNS); do
-            if [ $i -le ${#FIXED_SEEDS[@]} ]; then
-                SEEDS[$i]=${FIXED_SEEDS[$((i-1))]}
-            else
-                # If we need more runs than fixed seeds, generate random ones
-                SEEDS[$i]=$RANDOM
-            fi
-        done
-        ;;
-    *)
-        echo "Error: Unknown seed mode '$SEED_MODE'"
-        echo "Valid modes: random, fixed, sequential"
-        exit 1
-        ;;
-esac
-
-# Log the seeds being used
-echo "Seeds for this test: ${SEEDS[@]}"
-echo ""
-
 # Create a test log
 TEST_LOG="$WORKDIR/seed_test_log.txt"
-echo "PINN Seed Robustness Test (New Interface) - $(date)" > $TEST_LOG
-echo "Seed mode: $SEED_MODE" >> $TEST_LOG
+echo "PINN Seed Robustness Test (FORCED variables.py) - $(date)" > $TEST_LOG
 echo "Number of runs: $NUM_RUNS" >> $TEST_LOG
-echo "Seeds: ${SEEDS[@]}" >> $TEST_LOG
-echo "New interface: labeled data structure" >> $TEST_LOG
+echo "Configuration: ALL FROM variables.py - NO OVERRIDES" >> $TEST_LOG
 echo "========================================" >> $TEST_LOG
 
 # Process each run
 for i in $(seq 1 $NUM_RUNS)
 do
-    SEED=${SEEDS[$i]}
     RUN_DIR="run_$i"
 
-    echo "Processing: $RUN_DIR with seed $SEED"
-    echo "Run $i: seed $SEED" >> $TEST_LOG
+    echo "Processing: $RUN_DIR (using variables.py configuration)"
+    echo "Run $i: variables.py config" >> $TEST_LOG
 
     # Create or clean run directory
     if [ -d "$RUN_DIR" ]; then
@@ -99,33 +57,29 @@ do
 
     cd "$RUN_DIR"
 
-    # Update job name to include seed for tracking
-    JOB_NAME="pinn_${i}_s${SEED}"
+    # Update job name for tracking
+    JOB_NAME="pinn_${i}"
     sed -i "s/CHARCASE/$JOB_NAME/g" runCase.sh
 
-    # Update the Python command with proper arguments for new interface
-    # Remove any existing seed arguments first
-    sed -i 's/--seed [0-9]*//g' runCase.sh
-    sed -i 's/--epochs [0-9]*//g' runCase.sh
-
-    # Add proper arguments with new interface
+    # CRITICAL: Remove any parameter overrides and force clean command
     if grep -q "python pinn_trainer\.py" runCase.sh; then
-        # Update existing Python command
-        sed -i "s/python pinn_trainer\.py.*/python pinn_trainer.py --seed $SEED --epochs 100 --output-dir \./" runCase.sh
-        echo "  [OK] Updated Python command with seed $SEED and new interface"
+        # Replace with clean command - NO ARGUMENTS
+        sed -i "s/python pinn_trainer\.py.*/python pinn_trainer.py/" runCase.sh
+        echo "  [OK] Set clean Python command (no parameter overrides)"
     else
-        echo "  [ERROR] Warning: Could not find Python command in runCase.sh"
+        echo "  [ERROR] Could not find Python command in runCase.sh"
         echo "  Current runCase.sh content:"
         grep -n "python" runCase.sh || echo "  No Python commands found!"
+        cd "$WORKDIR"
+        continue
     fi
 
-    # Verify the command was set correctly
-    if grep -q "python pinn_trainer.py --seed $SEED" runCase.sh; then
-        echo "  [OK] Seed $SEED correctly set in runCase.sh"
+    # Verify the command is clean
+    if grep -q "python pinn_trainer.py$" runCase.sh; then
+        echo "  [OK] Clean command verified (no parameter overrides)"
     else
-        echo "  [WARNING] Warning: Seed may not be set correctly"
-        echo "  Current Python command:"
-        grep "python pinn_trainer.py" runCase.sh || echo "  No Python command found!"
+        echo "  [WARNING] Command may have parameter overrides:"
+        grep "python pinn_trainer.py" runCase.sh
     fi
 
     # Ensure data file is present
@@ -135,7 +89,7 @@ do
     fi
 
     # Submit job
-    echo "  Submitting job $JOB_NAME"
+    echo "  Submitting job $JOB_NAME (variables.py config)"
     qsub runCase.sh
 
     cd "$WORKDIR"
@@ -146,13 +100,14 @@ done
 
 echo ""
 echo "All $NUM_RUNS jobs submitted successfully!"
-echo "Seeds used: ${SEEDS[@]}"
+echo "Configuration: ALL FROM variables.py (epochs: from PINN_VARIABLES['epochs'])"
 echo ""
-echo "Key updates for new interface:"
-echo "- Using labeled data structure (boundary, interior, physics points)"
-echo "- Updated parameter names (N_boundary, N_interior, N_collocation)"
-echo "- Improved memory management and error handling"
-echo "- Enhanced convergence checking"
+echo "Key features of this version:"
+echo "- NO parameter overrides - everything from variables.py"
+echo "- NO --epochs arguments"
+echo "- NO --seed arguments"
+echo "- Consistent configuration across all runs"
+echo "- Seed comes from PINN_VARIABLES['random_seed']"
 echo ""
 echo "Monitor progress with:"
 echo "qstat -u $USER"
