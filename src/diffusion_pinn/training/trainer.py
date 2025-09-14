@@ -5,9 +5,9 @@ import gc
 from ..variables import PINN_VARIABLES
 
 def create_and_initialize_pinn(inputfile: str,
-                             N_boundary: int = PINN_VARIABLES['N_u'],
-                             N_interior: int = PINN_VARIABLES['N_i'],
-                             N_collocation: int = PINN_VARIABLES['N_f'],
+                             N_boundary: int,
+                             N_interior: int,
+                             N_collocation: int,
                              temporal_density: int = 5,
                              initial_D: float = PINN_VARIABLES['initial_D'],
                              seed: int = None) -> Tuple['DiffusionPINN', Dict]:

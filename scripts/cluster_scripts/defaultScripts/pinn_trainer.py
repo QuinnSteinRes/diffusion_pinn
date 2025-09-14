@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Updated pinn_trainer.py compatible with new labeled data structure
+# Fixed pinn_trainer.py - FORCES variables.py values, no fallbacks
 
 import os
 import sys
@@ -52,6 +52,28 @@ from diffusion_pinn.variables import PINN_VARIABLES
 
 print("diffusion_pinn location:", diffusion_pinn.__file__)
 print("train_pinn location:", train_pinn.__code__.co_filename)
+
+# FORCE VARIABLES.PY VALUES - NO ARGUMENTS ACCEPTED
+def get_forced_config():
+    """Force use of variables.py - no arguments or fallbacks allowed"""
+    config = {
+        'epochs': PINN_VARIABLES['epochs'],
+        'seed': PINN_VARIABLES['random_seed'],
+        'N_boundary': PINN_VARIABLES['N_u'],
+        'N_interior': PINN_VARIABLES['N_i'],
+        'N_collocation': PINN_VARIABLES['N_f'],
+        'initial_D': PINN_VARIABLES['initial_D'],
+        'learning_rate': PINN_VARIABLES['learning_rate']
+    }
+
+    print("\n" + "="*60)
+    print("FORCED CONFIGURATION FROM VARIABLES.PY")
+    print("="*60)
+    for key, value in config.items():
+        print(f"{key}: {value}")
+    print("="*60 + "\n")
+
+    return config
 
 def log_version_and_environment():
     """Log comprehensive version and environment information"""
@@ -196,7 +218,7 @@ def log_version_and_environment():
     except Exception as e:
         print(f"System info error: {e}")
 
-    print(f"\nPINN CONFIGURATION:")
+    print(f"\nPINN CONFIGURATION FROM VARIABLES.PY:")
     print("-" * 40)
     try:
         for key, value in sorted(PINN_VARIABLES.items()):
@@ -421,41 +443,27 @@ def check_convergence(D_history, threshold=0.001, window=100):
     return is_converged
 
 def main(args):
-    """Main training function with improved error handling and memory management"""
+    """Main training function - FORCES variables.py configuration"""
     start_time = time.time()
 
-    # Log version information FIRST
+    # FORCE CONFIGURATION FROM VARIABLES.PY - NO FALLBACKS
+    config = get_forced_config()
+
+    # Log version information
     log_version_and_environment()
 
     print("\n" + "="*50)
     print(f"Starting PINN training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Input file: {args.input_file}")
     print(f"Output directory: {args.output_dir}")
-    print(f"Epochs: {args.epochs}")
-    print(f"Random seed: {args.seed}")
+    print(f"FORCED EPOCHS FROM VARIABLES.PY: {config['epochs']}")
+    print(f"FORCED SEED FROM VARIABLES.PY: {config['seed']}")
     print("="*50 + "\n")
 
-    # ADD THIS CODE HERE - right after the initial prints
-    # Use variables.py if no command line args provided
-    if args.epochs is None:
-        args.epochs = PINN_VARIABLES['epochs']
-    if args.seed is None:
-        args.seed = PINN_VARIABLES['random_seed']
-
-    # Update the print statements to show the final values
-    print(f"Final Epochs (from variables.py if None): {args.epochs}")
-    print(f"Final Seed (from variables.py if None): {args.seed}")
-
-    if args.seed is not None:
-        print(f"Setting random seeds to {args.seed}")
-        tf.random.set_seed(args.seed)
-        np.random.seed(args.seed)
-    else:
-        # Use default seed from PINN_VARIABLES
-        default_seed = PINN_VARIABLES['random_seed']
-        print(f"Using default seed from variables.py: {default_seed}")
-        tf.random.set_seed(default_seed)
-        np.random.seed(default_seed)
+    # Set random seeds from variables.py ONLY
+    print(f"Setting random seeds to {config['seed']} (from variables.py)")
+    tf.random.set_seed(config['seed'])
+    np.random.seed(config['seed'])
 
     # Set up signal handlers for crashes
     setup_signal_handlers(os.path.join(args.output_dir, 'crash_log.txt'))
@@ -477,28 +485,28 @@ def main(args):
         # Preprocess the input data
         processed_file = preprocess_data(args.input_file)
 
-        # Create and initialize PINN with NEW INTERFACE
-        print("\nInitializing PINN model with labeled data structure...")
+        # Create and initialize PINN with FORCED VARIABLES.PY VALUES
+        print("\nInitializing PINN model with FORCED variables.py configuration...")
         pinn, labeled_data = create_and_initialize_pinn(
             inputfile=processed_file,
-            N_boundary=PINN_VARIABLES['N_u'],      # Updated parameter names
-            N_interior=PINN_VARIABLES['N_i'],      # Updated parameter names
-            N_collocation=PINN_VARIABLES['N_f'],   # Updated parameter names
-            temporal_density=5,                    # New parameter
-            initial_D=PINN_VARIABLES['initial_D'],
-            seed=args.seed
+            N_boundary=config['N_boundary'],      # FORCED from variables.py
+            N_interior=config['N_interior'],      # FORCED from variables.py
+            N_collocation=config['N_collocation'], # FORCED from variables.py
+            temporal_density=5,
+            initial_D=config['initial_D'],        # FORCED from variables.py
+            seed=config['seed']                   # FORCED from variables.py
         )
 
-        # Create optimizer with learning rate decay
-        print("Creating optimizer with learning rate decay...")
+        # Create optimizer with FORCED learning rate from variables.py
+        print("Creating optimizer with FORCED learning rate from variables.py...")
         optimizer = tf.keras.optimizers.Adam(
-            learning_rate=PINN_VARIABLES['learning_rate']
+            learning_rate=config['learning_rate']  # FORCED from variables.py
         )
 
-        # Train the model with NEW INTERFACE
+        # Train the model with FORCED epochs from variables.py
         print("\n" + "="*50)
         print(f"Starting training - {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Training for {args.epochs} epochs")
+        print(f"FORCED EPOCHS FROM VARIABLES.PY: {config['epochs']}")
         print(f"Initial D = {pinn.get_diffusion_coefficient():.6f}")
         print("="*50 + "\n")
 
@@ -506,11 +514,11 @@ def main(args):
         try:
             D_history, loss_history = train_pinn(
                 pinn=pinn,
-                labeled_data=labeled_data,  # ✅ NEW labeled data interface
+                labeled_data=labeled_data,
                 optimizer=optimizer,
-                epochs=args.epochs,
+                epochs=config['epochs'],    # FORCED from variables.py
                 save_dir=str(save_dir),
-                seed=args.seed
+                seed=config['seed']         # FORCED from variables.py
             )
 
             # Check if training was successful
@@ -551,7 +559,7 @@ def main(args):
 
             # Plot solutions - create new data processor for plotting
             print("Creating plots of final solutions...")
-            data_processor = DiffusionDataProcessor(processed_file, seed=args.seed)
+            data_processor = DiffusionDataProcessor(processed_file, seed=config['seed'])
             t_indices = [0, len(data_processor.t)//3, 2*len(data_processor.t)//3, -1]
             plot_solutions_and_error(
                 pinn=pinn,
@@ -583,6 +591,7 @@ def main(args):
         print("\n" + "="*50)
         print(f"Training completed - {time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Total runtime: {elapsed_time/60:.2f} minutes")
+        print(f"EPOCHS TRAINED: {len(D_history)} (should be {config['epochs']})")
         print(f"Final diffusion coefficient: {final_D:.8f}")
         print(f"Convergence status: {converged}")
         print("="*50 + "\n")
@@ -608,12 +617,14 @@ def main(args):
     return 0
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Train PINN model for diffusion problem')
-    parser.add_argument('--input-file', type=str, default=os.path.join(os.path.dirname(__file__), 'intensity_time_series_spatial_temporal.csv'),
-                      help='Path to input CSV file')
+    # MINIMAL ARGUMENT PARSER - ONLY INPUT AND OUTPUT
+    parser = argparse.ArgumentParser(description='Train PINN model - ALL SETTINGS FROM variables.py')
+    parser.add_argument('--input-file', type=str,
+                       default=os.path.join(os.path.dirname(__file__), 'intensity_time_series_spatial_temporal.csv'),
+                       help='Path to input CSV file')
     parser.add_argument('--output-dir', type=str, default='.',
-                      help='Base directory for output')
-    parser.add_argument('--epochs', type=int, default=None)
-    parser.add_argument('--seed', type=int, default=None)
+                       help='Base directory for output')
+
+    # NO OTHER ARGUMENTS - EVERYTHING FORCED FROM VARIABLES.PY
     args = parser.parse_args()
     sys.exit(main(args))
