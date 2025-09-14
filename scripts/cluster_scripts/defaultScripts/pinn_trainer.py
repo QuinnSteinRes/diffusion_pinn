@@ -435,6 +435,17 @@ def main(args):
     print(f"Random seed: {args.seed}")
     print("="*50 + "\n")
 
+    # ADD THIS CODE HERE - right after the initial prints
+    # Use variables.py if no command line args provided
+    if args.epochs is None:
+        args.epochs = PINN_VARIABLES['epochs']
+    if args.seed is None:
+        args.seed = PINN_VARIABLES['random_seed']
+
+    # Update the print statements to show the final values
+    print(f"Final Epochs (from variables.py if None): {args.epochs}")
+    print(f"Final Seed (from variables.py if None): {args.seed}")
+
     if args.seed is not None:
         print(f"Setting random seeds to {args.seed}")
         tf.random.set_seed(args.seed)
@@ -602,10 +613,7 @@ if __name__ == "__main__":
                       help='Path to input CSV file')
     parser.add_argument('--output-dir', type=str, default='.',
                       help='Base directory for output')
-    parser.add_argument('--epochs', type=int, default=PINN_VARIABLES['epochs'],
-                      help='Number of training epochs')
-    parser.add_argument('--seed', type=int, default=PINN_VARIABLES['random_seed'],
-                      help='Random seed for reproducibility')
-
+    parser.add_argument('--epochs', type=int, default=None)
+    parser.add_argument('--seed', type=int, default=None)
     args = parser.parse_args()
     sys.exit(main(args))

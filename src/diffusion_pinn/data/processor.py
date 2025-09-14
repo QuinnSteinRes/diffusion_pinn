@@ -93,10 +93,6 @@ class DiffusionDataProcessor:
                 except KeyError:
                     continue  # Skip points that don't match grid
 
-            if (start_idx // batch_size) % 10 == 0:  # Progress indicator
-                progress = (end_idx / len(self.t_data)) * 100
-                print(f"  Progress: {progress:.1f}%")
-
         # Clean up raw data arrays
         del self.x_data, self.y_data, self.t_data, self.intensity_data
 

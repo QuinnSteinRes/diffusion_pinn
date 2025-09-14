@@ -181,14 +181,6 @@ def train_pinn(pinn: 'DiffusionPINN',
                       f"I:{losses['interior']:.2e}, "
                       f"P:{losses['physics']:.2e})")
 
-            # Save intermediate model if requested
-            if save_dir and epoch > 0 and epoch % (epochs // 5) == 0:
-                checkpoint_path = f"{save_dir}/pinn_epoch_{epoch}.npz"
-                try:
-                    pinn.save_model(checkpoint_path)
-                except Exception as e:
-                    print(f"Warning: Could not save checkpoint: {e}")
-
         # Training completion
         final_D = pinn.get_diffusion_coefficient()
         print(f"\n" + "="*60)

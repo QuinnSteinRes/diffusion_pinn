@@ -86,7 +86,7 @@ MONITOR_PID=$!
 echo "Starting Python execution at $(date)" > execution.log
 {
     # Updated command with proper argument handling for new interface
-    python pinn_trainer.py --epochs $PINN_VARIABLES_epochs --seed $PINN_VARIABLES_random_seed
+    python pinn_trainer.py
     exit_code=$?
     echo "Python exit code: $exit_code" >> execution.log
 } >> logRun 2>&1
