@@ -63,7 +63,7 @@ do
     if grep -q "python pinn_trainer\.py" runCase.sh; then
         # Replace with clean command - NO ARGUMENTS
         sed -i "s/python pinn_trainer\.py.*/python pinn_trainer.py/" runCase.sh
-        echo "  [OK] Set clean Python command (no parameter overrides)"
+        echo "  Submitted"
     else
         echo "  [ERROR] Could not find Python command in runCase.sh"
         echo "  Current runCase.sh content:"
@@ -74,7 +74,7 @@ do
 
     # Verify the command is clean
     if grep -q "python pinn_trainer.py$" runCase.sh; then
-        echo "  [OK] Clean command verified (no parameter overrides)"
+        echo "  Submitted"
     else
         echo "  [WARNING] Command may have parameter overrides:"
         grep "python pinn_trainer.py" runCase.sh
