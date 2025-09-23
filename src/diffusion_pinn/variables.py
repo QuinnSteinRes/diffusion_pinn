@@ -20,9 +20,9 @@ PINN_VARIABLES = {
 
     # Loss Weights - Using v0.2.14 proven weighting that ensures good concentration fields
     'loss_weights': {
-        'initial': 0.2,
-        'boundary': 0.2,
-        'interior': 0.2,   # Strong emphasis on data fitting
-        'physics': 0.4      # Strong physics enforcement
+        'initial': 0.1,
+        'boundary': 0.1,
+        'interior': 0.1,   # Strong emphasis on data fitting
+        'physics': 0.7      # Strong physics enforcement
     }
 }
